@@ -445,11 +445,22 @@ pub struct BridgeTree<H, C, const DEPTH: u8> {
 
 impl<H: Debug, C: Debug, const DEPTH: u8> Debug for BridgeTree<H, C, DEPTH> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(
-            f,
-            "BridgeTree {{\n  depth: {:?},\n  prior_bridges: {:?},\n  current_bridge: {:?},\n  saved: {:?},\n  checkpoints: {:?},\n  max_checkpoints: {:?}\n}}",
-            DEPTH, self.prior_bridges, self.current_bridge, self.saved, self.checkpoints, self.max_checkpoints
-        )
+        let Self {
+            prior_bridges,
+            current_bridge,
+            saved,
+            checkpoints,
+            max_checkpoints,
+        } = self;
+
+        f.debug_struct(stringify!(BridgeTree))
+            .field("depth", &DEPTH)
+            .field("prior_bridges", prior_bridges)
+            .field("current_bridge", current_bridge)
+            .field("saved", saved)
+            .field("checkpoints", checkpoints)
+            .field("max_checkpoints", max_checkpoints)
+            .finish()
     }
 }
 
