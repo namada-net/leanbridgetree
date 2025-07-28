@@ -1,4 +1,4 @@
-//! # `bridgetree`
+//! # `leanbridgetree`
 //!
 //! This crate provides an implementation of an append-only Merkle tree structure. Individual
 //! leaves of the merkle tree may be marked such that witnesses will be maintained for the marked

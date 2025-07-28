@@ -1,4 +1,4 @@
-# `bridgetree`
+# `leanbridgetree`
 
 This is a Rust crate that provides an implementation of an append-only Merkle
 tree structure. Individual leaves of the merkle tree may be marked such that
@@ -16,7 +16,7 @@ leaf individually, given a bridge between the desired states computed by an
 outside source. The state of the tree is internally represented as a set of such
 bridges, and the data structure supports fusing and splitting of bridges.
 
-## [`Documentation`](https://docs.rs/bridgetree)
+## [`Documentation`](https://docs.rs/leanbridgetree)
 
 ## License
 
