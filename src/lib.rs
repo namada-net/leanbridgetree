@@ -24,51 +24,20 @@
 //!
 //! In this module, the term "ommer" is used as for the sibling of a parent node in a binary tree.
 pub use incrementalmerkletree::{
-    frontier::{Frontier, NonEmptyFrontier},
-    Address, Hashable, Level, Position, Retention, Source,
+    frontier::NonEmptyFrontier, Address, Hashable, Level, Position, Retention, Source,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
-use std::ops::Range;
 
-/// Errors that can be discovered during checks that verify the compatibility of adjacent bridges.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ContinuityError {
-    /// Returned when a bridge with no prior position information is
-    PriorPositionNotFound,
-    /// Returned when the subsequent bridge's prior position does not match the position of the
-    /// prior bridge's frontier.
-    PositionMismatch(Position, Position),
-}
-
-/// Errors that can be discovered during the process of attempting to create
-/// the witness for a leaf node.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum WitnessingError {
-    PositionNotMarked(Position),
-    BridgeFusionError(ContinuityError),
-    BridgeAddressInvalid(Address),
-}
-
-/// The information required to "update" witnesses from one state of a Merkle tree to another.
-///
-/// The witness for a particular leaf of a Merkle tree consists of the siblings of that leaf, plus
-/// the siblings of the parents of that leaf in a path to the root of the tree. When considering a
-/// Merkle tree where leaves are appended to the tree in a linear fashion (rather than being
-/// inserted at arbitrary positions), we often wish to produce a witness for a leaf that was
-/// appended to the tree at some point in the past. A [`MerkleBridge`] from one position in the
-/// tree to another position in the tree contains the minimal amount of information necessary to
-/// produce a witness for the leaf at the former position, given that leaves have been subsequently
-/// appended to reach the current position.
-///
-/// [`MerkleBridge`] values have a semigroup, such that the sum (`fuse`d) value of two successive
-/// bridges, along with a [`NonEmptyFrontier`] with its tip at the prior position of the first bridge
-/// being fused, can be used to produce a witness for the leaf at the tip of the prior frontier.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MerkleBridge<H> {
-    /// The position of the final leaf in the frontier of the bridge that this bridge is the
-    /// successor of, or None if this is the first bridge in a tree.
-    prior_position: Option<Position>,
+/// A sparse representation of a Merkle tree with linear appending of leaves that contains enough
+/// information to produce a witness for any `mark`ed leaf.
+#[derive(Default, Clone, PartialEq, Eq)]
+pub struct BridgeTree<H, const DEPTH: u8> {
+    /// The current (mutable) frontier of the tree.
+    frontier: Option<NonEmptyFrontier<H>>,
+    /// The ordered list of Merkle bridges representing the history
+    /// of the tree. There will be one bridge for each saved leaf.
+    prior_bridges: Vec<NonEmptyFrontier<H>>,
     /// The set of addresses for which we are waiting to discover the ommers.  The values of this
     /// set and the keys of the `need` map should always be disjoint. Also, this set should
     /// never contain an address for which the sibling value has been discovered; at that point,
@@ -84,126 +53,139 @@ pub struct MerkleBridge<H> {
     /// A map from addresses that were being tracked to the values of their ommers that have been
     /// discovered while scanning this bridge's range by adding leaves to the bridge's frontier.
     ommers: BTreeMap<Address, H>,
-    /// The leading edge of the bridge.
-    frontier: NonEmptyFrontier<H>,
 }
 
-impl<H> MerkleBridge<H> {
-    /// Construct a new Merkle bridge containing only the specified
-    /// leaf.
-    pub fn new(value: H) -> Self {
-        Self {
-            prior_position: None,
-            tracking: BTreeSet::new(),
-            ommers: BTreeMap::new(),
-            frontier: NonEmptyFrontier::new(value),
-        }
-    }
-
-    /// Construct a new Merkle bridge from its constituent parts.
-    pub fn from_parts(
-        prior_position: Option<Position>,
-        tracking: BTreeSet<Address>,
-        ommers: BTreeMap<Address, H>,
-        frontier: NonEmptyFrontier<H>,
-    ) -> Self {
-        Self {
-            prior_position,
+impl<H: Debug, const DEPTH: u8> Debug for BridgeTree<H, DEPTH> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        let Self {
+            frontier,
+            prior_bridges,
             tracking,
             ommers,
-            frontier,
-        }
-    }
+        } = self;
 
-    /// Returns the position of the final leaf in the frontier of the
-    /// bridge that this bridge is the successor of, or None
-    /// if this is the first bridge in a tree.
-    pub fn prior_position(&self) -> Option<Position> {
-        self.prior_position
-    }
-
-    /// Returns the position of the most recently appended leaf.
-    pub fn position(&self) -> Position {
-        self.frontier.position()
-    }
-
-    /// Returns the set of internal node addresses that we're searching
-    /// for the ommers for.
-    pub fn tracking(&self) -> &BTreeSet<Address> {
-        &self.tracking
-    }
-
-    /// Returns the set of internal node addresses that we're searching
-    /// for the ommers for.
-    pub fn ommers(&self) -> &BTreeMap<Address, H> {
-        &self.ommers
-    }
-
-    /// Returns the non-empty frontier of this Merkle bridge.
-    pub fn frontier(&self) -> &NonEmptyFrontier<H> {
-        &self.frontier
-    }
-
-    /// Returns the value of the most recently appended leaf.
-    pub fn current_leaf(&self) -> &H {
-        self.frontier.leaf()
-    }
-
-    /// Checks whether this bridge is a valid successor for the specified
-    /// bridge.
-    pub fn check_continuity(&self, next: &Self) -> Result<(), ContinuityError> {
-        if let Some(pos) = next.prior_position {
-            if pos == self.frontier.position() {
-                Ok(())
-            } else {
-                Err(ContinuityError::PositionMismatch(
-                    self.frontier.position(),
-                    pos,
-                ))
-            }
-        } else {
-            Err(ContinuityError::PriorPositionNotFound)
-        }
-    }
-
-    /// Returns the range of positions observed by this bridge.
-    pub fn position_range(&self) -> Range<Position> {
-        Range {
-            start: self.prior_position.unwrap_or_else(|| Position::from(0)),
-            end: self.position() + 1,
-        }
+        f.debug_struct(stringify!(BridgeTree))
+            .field("depth", &DEPTH)
+            .field("frontier", frontier)
+            .field("prior_bridges", prior_bridges)
+            .field("tracking", tracking)
+            .field("ommers", ommers)
+            .finish()
     }
 }
 
-impl<'a, H: Hashable + Clone + Ord + 'a> MerkleBridge<H> {
-    /// Constructs a new bridge to follow this one. If `mark_current_leaf` is true, the successor
-    /// will track the information necessary to create a witness for the leaf most
-    /// recently appended to this bridge's frontier.
-    #[must_use]
-    pub fn successor(&self, track_current_leaf: bool) -> Self {
-        let mut result = Self {
-            prior_position: Some(self.frontier.position()),
-            tracking: self.tracking.clone(),
-            ommers: BTreeMap::new(),
-            frontier: self.frontier.clone(),
-        };
+/// Errors that can appear when validating the internal consistency of a `[BridgeTree]`
+/// value when constructing a tree from its constituent parts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BridgeTreeError {
+    FullTree,
+    Discontinuity,
+    PositionNotMarked(Position),
+    BridgeAddressInvalid(Address),
+}
 
-        if track_current_leaf {
-            result.track_current_leaf();
+impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
+    /// Construct an empty BridgeTree value.
+    pub const fn new() -> Self {
+        Self {
+            prior_bridges: Vec::new(),
+            tracking: BTreeSet::new(),
+            ommers: BTreeMap::new(),
+            frontier: None,
+        }
+    }
+
+    /// Returns the prior bridges that make up this tree
+    pub fn prior_bridges(&self) -> &[NonEmptyFrontier<H>] {
+        &self.prior_bridges
+    }
+
+    /// Returns the bridge's frontier.
+    pub fn frontier(&self) -> Option<&NonEmptyFrontier<H>> {
+        self.frontier.as_ref()
+    }
+}
+
+impl<H: Hashable + Clone + Ord, const DEPTH: u8> BridgeTree<H, DEPTH> {
+    /// Construct a new BridgeTree that will start recording changes from the state of
+    /// the specified frontier.
+    pub fn from_frontier(frontier: NonEmptyFrontier<H>) -> Result<Self, BridgeTreeError> {
+        if frontier.position().is_complete_subtree(Level::from(DEPTH)) {
+            return Err(BridgeTreeError::FullTree);
         }
 
-        result
+        Ok(Self {
+            frontier: Some(frontier),
+            prior_bridges: Vec::new(),
+            tracking: BTreeSet::new(),
+            ommers: BTreeMap::new(),
+        })
     }
 
-    fn track_current_leaf(&mut self) {
-        self.tracking
-            .insert(Address::from(self.frontier.position()).current_incomplete());
+    /// Construct a new BridgeTree from its constituent parts, checking for internal
+    /// consistency.
+    pub fn from_parts(
+        frontier: Option<NonEmptyFrontier<H>>,
+        prior_bridges: Vec<NonEmptyFrontier<H>>,
+        tracking: BTreeSet<Address>,
+        ommers: BTreeMap<Address, H>,
+    ) -> Result<Self, BridgeTreeError> {
+        Self::check_consistency_internal(&prior_bridges, frontier.as_ref())?;
+
+        Ok(Self {
+            frontier,
+            prior_bridges,
+            tracking,
+            ommers,
+        })
     }
 
-    /// Advances this bridge's frontier by appending the specified node,
-    /// and updates any auth path ommers being tracked if necessary.
-    pub fn append(&mut self, value: H) {
-        self.frontier.append(value);
+    /*
+    fn check_consistency(&self) -> Result<(), BridgeTreeError> {
+        Self::check_consistency_internal(&self.prior_bridges, &self.current_bridge)
+    }
+    */
+
+    fn check_consistency_internal(
+        prior_bridges: &[NonEmptyFrontier<H>],
+        current_bridge: Option<&NonEmptyFrontier<H>>,
+    ) -> Result<(), BridgeTreeError> {
+        if let Some(frontier) = current_bridge {
+            if frontier.position().is_complete_subtree(Level::from(DEPTH)) {
+                return Err(BridgeTreeError::FullTree);
+            }
+        }
+
+        for (prev, next) in prior_bridges.iter().zip(prior_bridges.iter().skip(1)) {
+            if prev.position() >= next.position() {
+                return Err(BridgeTreeError::Discontinuity);
+            }
+        }
+
+        if let Some((prev, next)) = prior_bridges.last().zip(current_bridge) {
+            if prev.position() >= next.position() {
+                return Err(BridgeTreeError::Discontinuity);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Appends a new value to the tree at the next available slot.
+    /// Returns true if successful and false if the tree would exceed
+    /// the maximum allowed depth.
+    pub fn append(&mut self, value: H) -> Result<(), BridgeTreeError> {
+        let frontier = if let Some(frontier) = self.frontier.as_mut() {
+            if frontier.position().is_complete_subtree(Level::from(DEPTH)) {
+                return Err(BridgeTreeError::FullTree);
+            }
+            frontier
+        } else {
+            self.frontier = Some(NonEmptyFrontier::new(value));
+            return Ok(());
+        };
+
+        frontier.append(value);
 
         let mut found = vec![];
         for address in self.tracking.iter() {
@@ -212,12 +194,8 @@ impl<'a, H: Hashable + Clone + Ord + 'a> MerkleBridge<H> {
             // value for the sibling of the address we're tracking, we
             // remove the tracked address and replace it the next parent
             // of that address for which we need to find a sibling.
-            if self
-                .frontier()
-                .position()
-                .is_complete_subtree(address.level())
-            {
-                let digest = self.frontier.root(Some(address.level()));
+            if frontier.position().is_complete_subtree(address.level()) {
+                let digest = frontier.root(Some(address.level()));
                 self.ommers.insert(address.sibling(), digest);
                 found.push(*address);
             }
@@ -232,243 +210,8 @@ impl<'a, H: Hashable + Clone + Ord + 'a> MerkleBridge<H> {
             assert!(!self.ommers.contains_key(&parent));
             self.tracking.insert(parent);
         }
-    }
-
-    /// Returns a single MerkleBridge that contains the aggregate information
-    /// of this bridge and `next`, or None if `next` is not a valid successor
-    /// to this bridge. The resulting Bridge will have the same state as though
-    /// `self` had had every leaf used to construct `next` appended to it.
-    /// directly.
-    pub fn fuse(&self, next: &Self) -> Result<Self, ContinuityError> {
-        self.check_continuity(next)?;
-
-        Ok(Self {
-            prior_position: self.prior_position,
-            tracking: next.tracking.clone(),
-            ommers: self
-                .ommers
-                .iter()
-                .chain(next.ommers.iter())
-                .map(|(k, v)| (*k, v.clone()))
-                .collect(),
-            frontier: next.frontier.clone(),
-        })
-    }
-
-    /// Returns a single MerkleBridge that contains the aggregate information
-    /// of all the provided bridges (discarding internal frontiers) or None
-    /// if the provided iterator is empty. Returns a continuity error if
-    /// any of the bridges are not valid successors to one another.
-    fn fuse_all<T: Iterator<Item = &'a Self>>(
-        mut iter: T,
-    ) -> Result<Option<Self>, ContinuityError> {
-        let mut fused = iter.next().cloned();
-        for next in iter {
-            fused = Some(fused.unwrap().fuse(next)?);
-        }
-        Ok(fused)
-    }
-
-    /// If this bridge contains sufficient auth fragment information, construct an authentication
-    /// path for the specified position by interleaving with values from the prior frontier. This
-    /// method will panic if the position of the prior frontier does not match this bridge's prior
-    /// position.
-    fn witness(
-        &self,
-        depth: u8,
-        prior_frontier: &NonEmptyFrontier<H>,
-    ) -> Result<Vec<H>, WitnessingError> {
-        assert!(Some(prior_frontier.position()) == self.prior_position);
-
-        prior_frontier
-            .witness(depth, |addr| {
-                let r = addr.position_range();
-                if self.frontier.position() < r.start {
-                    Some(H::empty_root(addr.level()))
-                } else if r.contains(&self.frontier.position()) {
-                    Some(self.frontier.root(Some(addr.level())))
-                } else {
-                    // the frontier's position is after the end of the requested
-                    // range, so the requested value should exist in a stored
-                    // fragment
-                    self.ommers.get(&addr).cloned()
-                }
-            })
-            .map_err(WitnessingError::BridgeAddressInvalid)
-    }
-
-    /*
-    fn retain(&mut self, ommer_addrs: &BTreeSet<Address>) {
-        // Prune away any ommers & tracking addresses we don't need
-        self.tracking
-            .retain(|addr| ommer_addrs.contains(&addr.sibling()));
-        self.ommers.retain(|addr, _| ommer_addrs.contains(addr));
-    }
-    */
-}
-
-/// A sparse representation of a Merkle tree with linear appending of leaves that contains enough
-/// information to produce a witness for any `mark`ed leaf.
-#[derive(Default, Clone, PartialEq, Eq)]
-pub struct BridgeTree<H, const DEPTH: u8> {
-    /// The ordered list of Merkle bridges representing the history
-    /// of the tree. There will be one bridge for each saved leaf.
-    prior_bridges: Vec<MerkleBridge<H>>,
-    /// The current (mutable) bridge at the tip of the tree.
-    current_bridge: Option<MerkleBridge<H>>,
-    /// A map from positions for which we wish to be able to compute a
-    /// witness to index in the bridges vector.
-    saved: BTreeMap<Position, usize>,
-}
-
-impl<H: Debug, const DEPTH: u8> Debug for BridgeTree<H, DEPTH> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        let Self {
-            prior_bridges,
-            current_bridge,
-            saved,
-        } = self;
-
-        f.debug_struct(stringify!(BridgeTree))
-            .field("depth", &DEPTH)
-            .field("prior_bridges", prior_bridges)
-            .field("current_bridge", current_bridge)
-            .field("saved", saved)
-            .finish()
-    }
-}
-
-/// Errors that can appear when validating the internal consistency of a `[BridgeTree]`
-/// value when constructing a tree from its constituent parts.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BridgeTreeError {
-    IncorrectIncompleteIndex,
-    InvalidMarkIndex(usize),
-    PositionMismatch { expected: Position, found: Position },
-    InvalidSavePoints,
-    Discontinuity(ContinuityError),
-}
-
-impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
-    /// Construct an empty BridgeTree value.
-    pub const fn new() -> Self {
-        Self {
-            prior_bridges: Vec::new(),
-            current_bridge: None,
-            saved: BTreeMap::new(),
-        }
-    }
-
-    /// Returns the prior bridges that make up this tree
-    pub fn prior_bridges(&self) -> &[MerkleBridge<H>] {
-        &self.prior_bridges
-    }
-
-    /// Returns the current bridge at the tip of this tree
-    pub fn current_bridge(&self) -> &Option<MerkleBridge<H>> {
-        &self.current_bridge
-    }
-
-    /// Returns the map from leaf positions that have been marked to the index of
-    /// the bridge whose tip is at that position in this tree's list of bridges.
-    pub fn marked_indices(&self) -> &BTreeMap<Position, usize> {
-        &self.saved
-    }
-
-    /// Returns the bridge's frontier.
-    pub fn frontier(&self) -> Option<&NonEmptyFrontier<H>> {
-        self.current_bridge.as_ref().map(|b| b.frontier())
-    }
-}
-
-impl<H: Hashable + Clone + Ord, const DEPTH: u8> BridgeTree<H, DEPTH> {
-    /// Construct a new BridgeTree that will start recording changes from the state of
-    /// the specified frontier.
-    pub fn from_frontier(frontier: NonEmptyFrontier<H>) -> Self {
-        Self {
-            prior_bridges: vec![],
-            current_bridge: Some(MerkleBridge::from_parts(
-                None,
-                BTreeSet::new(),
-                BTreeMap::new(),
-                frontier,
-            )),
-            saved: BTreeMap::new(),
-        }
-    }
-
-    /// Construct a new BridgeTree from its constituent parts, checking for internal
-    /// consistency.
-    pub fn from_parts(
-        prior_bridges: Vec<MerkleBridge<H>>,
-        current_bridge: Option<MerkleBridge<H>>,
-        saved: BTreeMap<Position, usize>,
-    ) -> Result<Self, BridgeTreeError> {
-        Self::check_consistency_internal(&prior_bridges, &current_bridge, &saved)?;
-        Ok(Self {
-            prior_bridges,
-            current_bridge,
-            saved,
-        })
-    }
-
-    /*
-    fn check_consistency(&self) -> Result<(), BridgeTreeError> {
-        Self::check_consistency_internal(&self.prior_bridges, &self.current_bridge, &self.saved)
-    }
-    */
-
-    fn check_consistency_internal(
-        prior_bridges: &[MerkleBridge<H>],
-        current_bridge: &Option<MerkleBridge<H>>,
-        saved: &BTreeMap<Position, usize>,
-    ) -> Result<(), BridgeTreeError> {
-        // check that saved values correspond to bridges
-        for (pos, i) in saved {
-            if i >= &prior_bridges.len() {
-                return Err(BridgeTreeError::InvalidMarkIndex(*i));
-            }
-            let found = prior_bridges[*i].position();
-            if &found != pos {
-                return Err(BridgeTreeError::PositionMismatch {
-                    expected: *pos,
-                    found,
-                });
-            }
-        }
-
-        for (prev, next) in prior_bridges.iter().zip(prior_bridges.iter().skip(1)) {
-            prev.check_continuity(next)
-                .map_err(BridgeTreeError::Discontinuity)?;
-        }
-
-        if let Some((prev, next)) = prior_bridges.last().zip(current_bridge.as_ref()) {
-            prev.check_continuity(next)
-                .map_err(BridgeTreeError::Discontinuity)?;
-        }
 
         Ok(())
-    }
-
-    /// Appends a new value to the tree at the next available slot.
-    /// Returns true if successful and false if the tree would exceed
-    /// the maximum allowed depth.
-    pub fn append(&mut self, value: H) -> bool {
-        if let Some(bridge) = self.current_bridge.as_mut() {
-            if bridge
-                .frontier
-                .position()
-                .is_complete_subtree(Level::from(DEPTH))
-            {
-                false
-            } else {
-                bridge.append(value);
-                true
-            }
-        } else {
-            self.current_bridge = Some(MerkleBridge::new(value));
-            true
-        }
     }
 
     /// Obtains the root of the Merkle tree at the specified checkpoint depth
@@ -476,22 +219,20 @@ impl<H: Hashable + Clone + Ord, const DEPTH: u8> BridgeTree<H, DEPTH> {
     /// Returns `None` if there are not enough checkpoints available to reach the
     /// requested checkpoint depth.
     pub fn root(&self) -> H {
-        let root_level = Level::from(DEPTH);
-
-        self.current_bridge.as_ref().map_or_else(
-            || H::empty_root(root_level),
-            |bridge| bridge.frontier().root(Some(root_level)),
+        self.frontier.as_ref().map_or_else(
+            || H::empty_root(DEPTH.into()),
+            |frontier| frontier.root(Some(DEPTH.into())),
         )
     }
 
-    /// Returns the most recently appended leaf value.
+    /// Returns the most recently appended leaf value's position.
     pub fn current_position(&self) -> Option<Position> {
-        self.current_bridge.as_ref().map(|b| b.position())
+        self.frontier.as_ref().map(|f| f.position())
     }
 
     /// Returns the most recently appended leaf value.
     pub fn current_leaf(&self) -> Option<&H> {
-        self.current_bridge.as_ref().map(|b| b.current_leaf())
+        self.frontier.as_ref().map(|f| f.leaf())
     }
 
     /// Marks the current leaf as one for which we're interested in producing a witness.
@@ -499,147 +240,109 @@ impl<H: Hashable + Clone + Ord, const DEPTH: u8> BridgeTree<H, DEPTH> {
     /// Returns an optional value containing the current position if successful or if the current
     /// value was already marked, or None if the tree is empty.
     pub fn mark(&mut self) -> Option<Position> {
-        match self.current_bridge.take() {
-            Some(cur_b) => {
-                let pos = cur_b.position();
+        let frontier = self.frontier.as_ref()?;
 
-                // the successor(true) call will ensure that the marked leaf is tracked
-                let successor = cur_b.successor(true);
-                self.prior_bridges.push(cur_b);
-                self.current_bridge = Some(successor);
-
-                // save the position of the marked leaf
-                if let std::collections::btree_map::Entry::Vacant(e) = self.saved.entry(pos) {
-                    e.insert(self.prior_bridges.len() - 1);
-                }
-
-                Some(pos)
-            }
-            None => None,
+        if self.lookup_prior_bridge(frontier.position()).is_err() {
+            self.prior_bridges.push(frontier.clone());
+            self.tracking
+                .insert(Address::from(frontier.position()).current_incomplete());
         }
+
+        Some(frontier.position())
     }
 
     /// Return a set of all the positions for which we have marked.
-    pub fn marked_positions(&self) -> BTreeSet<Position> {
-        self.saved.keys().cloned().collect()
+    pub fn marked_positions(&self) -> impl Iterator<Item = Position> + '_ {
+        self.prior_bridges
+            .iter()
+            .map(|bridge_frontier| bridge_frontier.position())
     }
 
     /// Returns the leaf at the specified position if the tree can produce
     /// a witness for it.
     pub fn get_marked_leaf(&self, position: Position) -> Option<&H> {
-        self.saved
-            .get(&position)
-            .and_then(|idx| self.prior_bridges.get(*idx).map(|b| b.current_leaf()))
+        let index = self.lookup_prior_bridge(position).ok()?;
+        Some(self.prior_bridges[index].leaf())
     }
 
     /// Marks the value at the specified position as a value we're no longer
     /// interested in maintaining a mark for. Returns true if successful and
     /// false if we were already not maintaining a mark at this position.
-    pub fn remove_mark(&mut self, position: Position) -> bool {
-        if self.saved.contains_key(&position) {
-            self.saved.remove(&position);
-            true
-        } else {
-            false
-        }
+    pub fn remove_mark(&mut self, position: Position) -> Result<(), BridgeTreeError> {
+        // Figure out where the marked leaf is in the vector of bridges.
+        let index_of_marked_leaf_bridge = self
+            .lookup_prior_bridge(position)
+            .map_err(|_| BridgeTreeError::PositionNotMarked(position))?;
+
+        // Then remove it. This shifts all bridges following `index_of_marked_leaf_bridge`
+        // in the vector in O(n) time.
+        self.prior_bridges.remove(index_of_marked_leaf_bridge);
+
+        // Let's also get rid of the tracking data.
+        let ommer_addrs: BTreeSet<_> = self
+            .prior_bridges
+            .iter()
+            .flat_map(|prior_bridge_frontier| {
+                prior_bridge_frontier
+                    .position()
+                    .witness_addrs(Level::from(DEPTH))
+                    .filter_map(|(addr, source)| {
+                        if source == Source::Future {
+                            Some(addr)
+                        } else {
+                            None
+                        }
+                    })
+            })
+            .collect();
+        self.tracking
+            .retain(|addr| ommer_addrs.contains(&addr.sibling()));
+        self.ommers.retain(|addr, _| ommer_addrs.contains(addr));
+
+        Ok(())
     }
 
     /// Obtains a witness for the value at the specified leaf position.
     /// Returns an error if there is no witness information for the requested
     /// position.
-    pub fn witness(&self, position: Position) -> Result<Vec<H>, WitnessingError> {
+    pub fn witness(&self, position: Position) -> Result<Vec<H>, BridgeTreeError> {
+        let current_frontier = self
+            .frontier
+            .as_ref()
+            .ok_or(BridgeTreeError::PositionNotMarked(position))?;
+
         let saved_idx = self
-            .saved
-            .get(&position)
-            .ok_or(WitnessingError::PositionNotMarked(position))?;
+            .lookup_prior_bridge(position)
+            .map_err(|_| BridgeTreeError::PositionNotMarked(position))?;
 
-        let prior_frontier = &self.prior_bridges[*saved_idx].frontier;
+        let prior_frontier = &self.prior_bridges[saved_idx];
 
-        // Fuse the following bridges to obtain a bridge that has all
-        // of the data to the right of the selected value in the tree.
-        let fuse_from = saved_idx + 1;
-        let successor = MerkleBridge::fuse_all(
-            // fuse all the way up to the current tip
-            self.prior_bridges[fuse_from..]
-                .iter()
-                .chain(&self.current_bridge),
-        )
-        .map(|fused| fused.unwrap()) // safe as the iterator being fused is nonempty
-        .map_err(WitnessingError::BridgeFusionError)?;
+        prior_frontier
+            .witness(DEPTH, |addr| {
+                let r = addr.position_range();
 
-        successor.witness(DEPTH, prior_frontier)
+                if current_frontier.position() < r.start {
+                    Some(H::empty_root(addr.level()))
+                } else if r.contains(&current_frontier.position()) {
+                    Some(current_frontier.root(Some(addr.level())))
+                } else {
+                    // the frontier's position is after the end of the requested
+                    // range, so the requested value should exist in a stored
+                    // fragment
+                    self.ommers.get(&addr).cloned()
+                }
+            })
+            .map_err(BridgeTreeError::BridgeAddressInvalid)
     }
 
-    /// Remove state from the tree that no longer needs to be maintained
-    /// because it is associated with marks that have been removed from
-    /// the tree.
-    pub fn garbage_collect(&mut self) {
-        /*
-        let gc_len = self.checkpoints.front().unwrap().bridges_len;
-        let mut cur: Option<MerkleBridge<H>> = None;
-        let mut merged = 0;
-        let mut ommer_addrs: BTreeSet<Address> = BTreeSet::new();
-
-        for (i, next_bridge) in std::mem::take(&mut self.prior_bridges)
-            .into_iter()
-            .enumerate()
-        {
-            if let Some(cur_bridge) = cur {
-                let pos = cur_bridge.position();
-                let mut new_cur = if self.saved.contains_key(&pos) || i > gc_len {
-                    // We need to remember cur_bridge; update its save index & put next_bridge
-                    // on the chopping block
-                    if let Some(idx) = self.saved.get_mut(&pos) {
-                        *idx -= merged;
-                    }
-
-                    // Add the elements of the auth path to the set of addresses we should
-                    // continue to track and retain information for
-                    for (addr, source) in cur_bridge
-                        .frontier
-                        .position()
-                        .witness_addrs(Level::from(DEPTH))
-                    {
-                        if source == Source::Future {
-                            ommer_addrs.insert(addr);
-                        }
-                    }
-
-                    self.prior_bridges.push(cur_bridge);
-                    next_bridge
-                } else {
-                    // We can fuse these bridges together because we don't need to
-                    // remember next_bridge.
-                    merged += 1;
-                    cur_bridge.fuse(&next_bridge).unwrap()
-                };
-
-                new_cur.retain(&ommer_addrs);
-                cur = Some(new_cur);
-            } else {
-                // this case will only occur for the first bridge
-                cur = Some(next_bridge);
-            }
-        }
-
-        // unwrap is safe because we know that prior_bridges was nonempty.
-        if let Some(last_bridge) = cur {
-            if let Some(idx) = self.saved.get_mut(&last_bridge.position()) {
-                *idx -= merged;
-            }
-            self.prior_bridges.push(last_bridge);
-        }
-
-        for c in self.checkpoints.iter_mut() {
-            c.rewrite_indices(|idx| idx - merged);
-        }
-        if let Err(e) = self.check_consistency() {
-            panic!(
-                "Consistency check failed after garbage collection with {:?}",
-                e
-            );
-        }
-        */
+    /// Look-up a prior bridge, given the position of a marked leaf.
+    ///
+    /// Returns the index of the bridge if `Ok`, or where a new bridge
+    /// could be inserted, if `Err`.
+    #[inline]
+    fn lookup_prior_bridge(&self, position: Position) -> Result<usize, usize> {
+        self.prior_bridges
+            .binary_search_by_key(&position, |bridge_frontier| bridge_frontier.position())
     }
 }
 
