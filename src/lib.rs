@@ -23,11 +23,18 @@
 //! the now unnecessary information from the structure.
 //!
 //! In this module, the term "ommer" is used as for the sibling of a parent node in a binary tree.
+
+#![cfg_attr(not(test), no_std)]
+
+extern crate alloc;
+
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::vec::Vec;
+use core::fmt::Debug;
+
 pub use incrementalmerkletree::{
     frontier::NonEmptyFrontier, Address, Hashable, Level, Position, Retention, Source,
 };
-use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Debug;
 
 /// A sparse representation of a Merkle tree with linear appending of leaves that contains enough
 /// information to produce a witness for any `mark`ed leaf.
@@ -56,7 +63,7 @@ pub struct BridgeTree<H, const DEPTH: u8> {
 }
 
 impl<H: Debug, const DEPTH: u8> Debug for BridgeTree<H, DEPTH> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
         let Self {
             frontier,
             prior_bridges,
@@ -187,7 +194,7 @@ impl<H: Hashable + Clone + Ord, const DEPTH: u8> BridgeTree<H, DEPTH> {
 
         frontier.append(value);
 
-        let mut found = vec![];
+        let mut found = Vec::new();
         for address in self.tracking.iter() {
             // We know that there will only ever be one address that we're
             // tracking at a given level, because as soon as we find a
