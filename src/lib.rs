@@ -237,9 +237,9 @@ impl<'a, H: Hashable + Clone + Ord + 'a> MerkleBridge<H> {
     /// Returns a single MerkleBridge that contains the aggregate information
     /// of this bridge and `next`, or None if `next` is not a valid successor
     /// to this bridge. The resulting Bridge will have the same state as though
-    /// `self` had had every leaf used to construct `next` appended to it
+    /// `self` had had every leaf used to construct `next` appended to it.
     /// directly.
-    fn fuse(&self, next: &Self) -> Result<Self, ContinuityError> {
+    pub fn fuse(&self, next: &Self) -> Result<Self, ContinuityError> {
         self.check_continuity(next)?;
 
         Ok(Self {
