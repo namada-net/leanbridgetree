@@ -256,7 +256,12 @@ impl<H: Hashable + Clone + Ord, const DEPTH: u8> BridgeTree<H, DEPTH> {
     pub fn mark(&mut self) -> Option<Position> {
         let frontier = self.frontier.as_ref()?;
 
-        if self.lookup_prior_bridge(frontier.position()).is_err() {
+        let last_leaf_already_marked = self
+            .prior_bridges
+            .last()
+            .is_some_and(|bridge_frontier| bridge_frontier.position() == frontier.position());
+
+        if !last_leaf_already_marked {
             self.prior_bridges.push(frontier.clone());
             self.tracking
                 .insert(Address::from(frontier.position()).current_incomplete());
