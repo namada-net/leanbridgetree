@@ -232,6 +232,13 @@ impl<H: Hashable + Clone + Ord, const DEPTH: u8> BridgeTree<H, DEPTH> {
         )
     }
 
+    /// Returns the size of the Merkle tree that this frontier corresponds to.
+    pub fn tree_size(&self) -> u64 {
+        self.frontier
+            .as_ref()
+            .map_or(0, |f| u64::from(f.position()) + 1)
+    }
+
     /// Returns the most recently appended leaf value's position.
     pub fn current_position(&self) -> Option<Position> {
         self.frontier.as_ref().map(|f| f.position())
