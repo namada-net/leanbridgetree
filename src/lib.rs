@@ -72,7 +72,7 @@ impl<H: Debug, const DEPTH: u8> Debug for BridgeTree<H, DEPTH> {
         } = self;
 
         f.debug_struct(stringify!(BridgeTree))
-            .field("depth", &DEPTH)
+            .field("max_depth", &DEPTH)
             .field("frontier", frontier)
             .field("prior_bridges", prior_bridges)
             .field("tracking", tracking)
