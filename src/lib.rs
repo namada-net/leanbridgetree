@@ -3,16 +3,13 @@
 //! This crate provides an implementation of an append-only Merkle tree structure. Individual
 //! leaves of the merkle tree may be marked such that witnesses will be maintained for the marked
 //! leaves as additional nodes are appended to the tree, but leaf and node data not specifically
-//! required to maintain these witnesses is not retained, for space efficiency. The data structure
-//! also supports checkpointing of the tree state such that the tree may be reset to a previously
-//! checkpointed state, up to a fixed number of checkpoints.
+//! required to maintain these witnesses is not retained, for space efficiency.
 //!
 //! The crate also supports using "bridges" containing the minimal possible amount of data to
 //! advance witnesses for marked leaves data up to recent checkpoints or the the latest state of
 //! the tree without having to append each intermediate leaf individually, given a bridge between
 //! the desired states computed by an outside source. The state of the tree is internally
-//! represented as a set of such bridges, and the data structure supports fusing and splitting of
-//! bridges.
+//! represented as a set of such bridges.
 //!
 //! ## Marking
 //!
@@ -22,7 +19,11 @@
 //! maintaining a witness. When we're later no longer in a leaf, we can remove the mark and drop
 //! the now unnecessary information from the structure.
 //!
-//! In this module, the term "ommer" is used as for the sibling of a parent node in a binary tree.
+//! ## Glossary
+//!
+//! - Frontier – leading leaf node in a binary tree.
+//! - Ommer – sibling of a parent node in a binary tree.
+//! - Bridge - past frontier and ommer data necessary to witness leaves before the latest frontier.
 
 #![cfg_attr(not(test), no_std)]
 
@@ -36,17 +37,17 @@ pub use incrementalmerkletree::{
     Address, Hashable, Level, Position, Source, frontier::NonEmptyFrontier,
 };
 
-/// A sparse representation of a Merkle tree with linear appending of leaves that contains enough
-/// information to produce a witness for any `mark`ed leaf.
+/// Sparse representation of a Merkle tree with linear appending of leaves that contains enough
+/// information to produce a witness for any [marked](BridgeTree::mark) leaf.
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct BridgeTree<H, const DEPTH: u8> {
     /// The current (mutable) frontier of the tree.
     frontier: Option<NonEmptyFrontier<H>>,
-    /// The ordered list of Merkle bridges representing the history
+    /// Ordered list of Merkle bridges representing the history
     /// of the tree. There will be one bridge for each saved leaf.
     prior_bridges: Vec<NonEmptyFrontier<H>>,
-    /// The set of addresses for which we are waiting to discover the ommers.  The values of this
-    /// set and the keys of the `need` map should always be disjoint. Also, this set should
+    /// Set of addresses for which we are waiting to discover the ommers.  The values of this
+    /// set and the keys of the `ommers` map should always be disjoint. Also, this set should
     /// never contain an address for which the sibling value has been discovered; at that point,
     /// the address is replaced in this set with its parent and the address/sibling pair is stored
     /// in `ommers`.
@@ -57,13 +58,15 @@ pub struct BridgeTree<H, const DEPTH: u8> {
     /// Therefore, we are tracking that address as we do not yet have enough information to compute
     /// its sibling without filling the sibling subtree with empty nodes.
     tracking: BTreeSet<Address>,
-    /// A map from addresses that were being tracked to the values of their ommers that have been
+    /// Map from addresses that were being tracked to the values of their ommers that have been
     /// discovered while scanning this bridge's range by adding leaves to the bridge's frontier.
     ommers: BTreeMap<Address, H>,
 }
 
 impl<H: Debug, const DEPTH: u8> Debug for BridgeTree<H, DEPTH> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
+        // NB: We destructure `self` in order to catch compiler errors, should
+        // its internal structure ever change. See note below.
         let Self {
             frontier,
             prior_bridges,
@@ -71,8 +74,9 @@ impl<H: Debug, const DEPTH: u8> Debug for BridgeTree<H, DEPTH> {
             ommers,
         } = self;
 
+        // XXX: Keep me up to date!
         f.debug_struct(stringify!(BridgeTree))
-            .field("max_depth", &DEPTH)
+            .field("max_depth", &DEPTH) // virtual field
             .field("frontier", frontier)
             .field("prior_bridges", prior_bridges)
             .field("tracking", tracking)
@@ -81,18 +85,22 @@ impl<H: Debug, const DEPTH: u8> Debug for BridgeTree<H, DEPTH> {
     }
 }
 
-/// Errors that can appear when validating the internal consistency of a `[BridgeTree]`
-/// value when constructing a tree from its constituent parts.
+/// [`BridgeTree`] related errors.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BridgeTreeError {
+    /// The tree is full (i.e. has reached is maximum depth) and can no longer acccept new leaves.
     FullTree,
+    /// The bridges aren't contiguous (i.e. their frontier positions aren't monotonically
+    /// increasing).
     Discontinuity,
+    /// The requested position is not tracked, therefore we can't generate its witnesses.
     PositionNotMarked(Position),
-    BridgeAddressInvalid(Address),
+    /// The tree is missing the data of an ommer at the given address.
+    MissingOmmer(Address),
 }
 
 impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
-    /// Construct an empty BridgeTree value.
+    /// Construct an empty [`BridgeTree`].
     pub const fn new() -> Self {
         Self {
             prior_bridges: Vec::new(),
@@ -102,19 +110,37 @@ impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
         }
     }
 
-    /// Returns the prior bridges that make up this tree
+    /// Return the prior bridges that make up this tree
     pub fn prior_bridges(&self) -> &[NonEmptyFrontier<H>] {
         &self.prior_bridges
     }
 
-    /// Returns the bridge's frontier.
+    /// Return the bridge's frontier.
     pub fn frontier(&self) -> Option<&NonEmptyFrontier<H>> {
         self.frontier.as_ref()
     }
-}
 
-impl<H: Hashable + Clone + Ord, const DEPTH: u8> BridgeTree<H, DEPTH> {
-    /// Construct a new BridgeTree that will start recording changes from the state of
+    /// Returns the most recently appended leaf value's position.
+    pub fn current_position(&self) -> Option<Position> {
+        self.frontier().map(|f| f.position())
+    }
+
+    /// Returns the most recently appended leaf value.
+    pub fn current_leaf(&self) -> Option<&H> {
+        self.frontier().map(|f| f.leaf())
+    }
+
+    /// Returns the size of the Merkle tree that this frontier corresponds to.
+    ///
+    /// The returned values corresponds to the number of leaves appended to the
+    /// tree.
+    pub fn tree_size(&self) -> u64 {
+        self.frontier
+            .as_ref()
+            .map_or(0, |f| u64::from(f.position()) + 1)
+    }
+
+    /// Construct a new [`BridgeTree`] that will start recording changes from the state of
     /// the specified frontier.
     pub fn from_frontier(frontier: NonEmptyFrontier<H>) -> Result<Self, BridgeTreeError> {
         if frontier.position().is_complete_subtree(Level::from(DEPTH)) {
@@ -129,7 +155,7 @@ impl<H: Hashable + Clone + Ord, const DEPTH: u8> BridgeTree<H, DEPTH> {
         })
     }
 
-    /// Construct a new BridgeTree from its constituent parts, checking for internal
+    /// Construct a new [`BridgeTree`] from its constituent parts, checking for internal
     /// consistency.
     pub fn from_parts(
         frontier: Option<NonEmptyFrontier<H>>,
@@ -147,12 +173,21 @@ impl<H: Hashable + Clone + Ord, const DEPTH: u8> BridgeTree<H, DEPTH> {
         })
     }
 
-    /*
-    fn check_consistency(&self) -> Result<(), BridgeTreeError> {
-        Self::check_consistency_internal(&self.prior_bridges, &self.current_bridge)
+    /// Return an iterator over all the marked leaf positions.
+    pub fn marked_positions(&self) -> impl Iterator<Item = Position> + '_ {
+        self.prior_bridges
+            .iter()
+            .map(|bridge_frontier| bridge_frontier.position())
     }
-    */
 
+    /// Returns the leaf at the specified position if the tree can produce
+    /// a witness for it.
+    pub fn get_marked_leaf(&self, position: Position) -> Option<&H> {
+        let index = self.lookup_prior_bridge(position).ok()?;
+        Some(self.prior_bridges[index].leaf())
+    }
+
+    /// Verify the integrity of the [`BridgeTree`].
     fn check_consistency_internal(
         prior_bridges: &[NonEmptyFrontier<H>],
         current_bridge: Option<&NonEmptyFrontier<H>>,
@@ -178,21 +213,33 @@ impl<H: Hashable + Clone + Ord, const DEPTH: u8> BridgeTree<H, DEPTH> {
         Ok(())
     }
 
-    /// Appends a new value to the tree at the next available slot.
-    /// Returns true if successful and false if the tree would exceed
-    /// the maximum allowed depth.
-    pub fn append(&mut self, value: H) -> Result<(), BridgeTreeError> {
+    /// Look-up a prior bridge, given the position of a marked leaf.
+    ///
+    /// Returns the index of the bridge if `Ok`, or where a new bridge
+    /// could be inserted, if `Err`.
+    #[inline]
+    fn lookup_prior_bridge(&self, position: Position) -> Result<usize, usize> {
+        self.prior_bridges
+            .binary_search_by_key(&position, |bridge_frontier| bridge_frontier.position())
+    }
+}
+
+impl<H: Hashable + Clone, const DEPTH: u8> BridgeTree<H, DEPTH> {
+    /// Append a new leaf to the tree at the next available slot.
+    ///
+    /// Returns an error if the tree would exceed the maximum allowed depth.
+    pub fn append(&mut self, leaf: H) -> Result<(), BridgeTreeError> {
         let frontier = if let Some(frontier) = self.frontier.as_mut() {
             if frontier.position().is_complete_subtree(Level::from(DEPTH)) {
                 return Err(BridgeTreeError::FullTree);
             }
             frontier
         } else {
-            self.frontier = Some(NonEmptyFrontier::new(value));
+            self.frontier = Some(NonEmptyFrontier::new(leaf));
             return Ok(());
         };
 
-        frontier.append(value);
+        frontier.append(leaf);
 
         let mut found = Vec::new();
         for address in self.tracking.iter() {
@@ -221,32 +268,18 @@ impl<H: Hashable + Clone + Ord, const DEPTH: u8> BridgeTree<H, DEPTH> {
         Ok(())
     }
 
-    /// Obtains the root of the Merkle tree at the specified checkpoint depth
-    /// by hashing against empty nodes up to the maximum height of the tree.
-    /// Returns `None` if there are not enough checkpoints available to reach the
-    /// requested checkpoint depth.
+    /// Obtain the root of the Merkle tree at the maximum depth.
+    #[inline]
     pub fn root(&self) -> H {
+        self.root_at_depth(DEPTH.into())
+    }
+
+    /// Obtain the root of the Merkle tree at the specified level.
+    pub fn root_at_depth(&self, depth: Level) -> H {
         self.frontier.as_ref().map_or_else(
-            || H::empty_root(DEPTH.into()),
-            |frontier| frontier.root(Some(DEPTH.into())),
+            || H::empty_root(depth),
+            |frontier| frontier.root(Some(depth)),
         )
-    }
-
-    /// Returns the size of the Merkle tree that this frontier corresponds to.
-    pub fn tree_size(&self) -> u64 {
-        self.frontier
-            .as_ref()
-            .map_or(0, |f| u64::from(f.position()) + 1)
-    }
-
-    /// Returns the most recently appended leaf value's position.
-    pub fn current_position(&self) -> Option<Position> {
-        self.frontier.as_ref().map(|f| f.position())
-    }
-
-    /// Returns the most recently appended leaf value.
-    pub fn current_leaf(&self) -> Option<&H> {
-        self.frontier.as_ref().map(|f| f.leaf())
     }
 
     /// Marks the current leaf as one for which we're interested in producing a witness.
@@ -270,23 +303,10 @@ impl<H: Hashable + Clone + Ord, const DEPTH: u8> BridgeTree<H, DEPTH> {
         Some(frontier.position())
     }
 
-    /// Return a set of all the positions for which we have marked.
-    pub fn marked_positions(&self) -> impl Iterator<Item = Position> + '_ {
-        self.prior_bridges
-            .iter()
-            .map(|bridge_frontier| bridge_frontier.position())
-    }
-
-    /// Returns the leaf at the specified position if the tree can produce
-    /// a witness for it.
-    pub fn get_marked_leaf(&self, position: Position) -> Option<&H> {
-        let index = self.lookup_prior_bridge(position).ok()?;
-        Some(self.prior_bridges[index].leaf())
-    }
-
     /// Marks the value at the specified position as a value we're no longer
-    /// interested in maintaining a mark for. Returns true if successful and
-    /// false if we were already not maintaining a mark at this position.
+    /// interested in maintaining a mark for.
+    ///
+    /// Returns an error if we were already not maintaining a mark at this position.
     pub fn remove_mark(&mut self, position: Position) -> Result<(), BridgeTreeError> {
         // Figure out where the marked leaf is in the vector of bridges.
         let index_of_marked_leaf_bridge = self
@@ -322,6 +342,7 @@ impl<H: Hashable + Clone + Ord, const DEPTH: u8> BridgeTree<H, DEPTH> {
     }
 
     /// Obtains a witness for the value at the specified leaf position.
+    ///
     /// Returns an error if there is no witness information for the requested
     /// position.
     pub fn witness(&self, position: Position) -> Result<Vec<H>, BridgeTreeError> {
@@ -351,17 +372,7 @@ impl<H: Hashable + Clone + Ord, const DEPTH: u8> BridgeTree<H, DEPTH> {
                     self.ommers.get(&addr).cloned()
                 }
             })
-            .map_err(BridgeTreeError::BridgeAddressInvalid)
-    }
-
-    /// Look-up a prior bridge, given the position of a marked leaf.
-    ///
-    /// Returns the index of the bridge if `Ok`, or where a new bridge
-    /// could be inserted, if `Err`.
-    #[inline]
-    fn lookup_prior_bridge(&self, position: Position) -> Result<usize, usize> {
-        self.prior_bridges
-            .binary_search_by_key(&position, |bridge_frontier| bridge_frontier.position())
+            .map_err(BridgeTreeError::MissingOmmer)
     }
 }
 
