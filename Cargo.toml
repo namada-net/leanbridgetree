@@ -13,15 +13,14 @@ homepage = "https://github.com/zcash/incrementalmerkletree"
 license = "MIT OR Apache-2.0"
 categories = ["algorithms", "data-structures"]
 
+[features]
+std = []
+test-dependencies = ["proptest", "incrementalmerkletree/test-dependencies"]
+
 [dependencies]
-incrementalmerkletree = "0.8"
+incrementalmerkletree = { version = "0.8", default-features = false }
 proptest = { version = "1", optional = true }
 
 [dev-dependencies]
-incrementalmerkletree = { version = "0.8", features = ["test-dependencies"] }
 incrementalmerkletree-testing = "=0.2.0-backcompat.0.8"
 proptest = "1"
-
-[features]
-std = []
-test-dependencies = ["proptest"]
