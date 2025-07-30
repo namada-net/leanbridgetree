@@ -248,11 +248,11 @@ impl<H: Hashable + Clone, const DEPTH: u8> BridgeTree<H, DEPTH> {
     pub fn append(&mut self, leaf: H) -> Result<(), BridgeTreeError> {
         let frontier = if let Some(frontier) = self.frontier.as_mut() {
             if frontier.position().is_complete_subtree(Level::from(DEPTH)) {
-                return Err(BridgeTreeError::FullTree);
+                return Err(unlikely(|| BridgeTreeError::FullTree));
             }
             frontier
         } else {
-            self.frontier = Some(NonEmptyFrontier::new(leaf));
+            self.frontier = unlikely(|| Some(NonEmptyFrontier::new(leaf)));
             return Ok(());
         };
 
@@ -294,7 +294,7 @@ impl<H: Hashable + Clone, const DEPTH: u8> BridgeTree<H, DEPTH> {
     /// Obtain the root of the Merkle tree at the specified level.
     pub fn root_at_depth(&self, depth: Level) -> H {
         self.frontier.as_ref().map_or_else(
-            || H::empty_root(depth),
+            || unlikely(|| H::empty_root(depth)),
             |frontier| frontier.root(Some(depth)),
         )
     }
@@ -315,6 +315,9 @@ impl<H: Hashable + Clone, const DEPTH: u8> BridgeTree<H, DEPTH> {
             self.prior_bridges.push(frontier.clone());
             self.tracking
                 .insert(Address::from(frontier.position()).current_incomplete());
+        } else {
+            // NB: Simply mark the cold path.
+            unlikely(|| {});
         }
 
         Some(frontier.position())
@@ -328,7 +331,7 @@ impl<H: Hashable + Clone, const DEPTH: u8> BridgeTree<H, DEPTH> {
         // Figure out where the marked leaf is in the vector of bridges.
         let index_of_marked_leaf_bridge = self
             .lookup_prior_bridge(position)
-            .map_err(|_| BridgeTreeError::PositionNotMarked(position))?;
+            .map_err(|_| unlikely(|| BridgeTreeError::PositionNotMarked(position)))?;
 
         // Then remove it. This shifts all bridges following `index_of_marked_leaf_bridge`
         // in the vector in O(n) time.
@@ -370,7 +373,7 @@ impl<H: Hashable + Clone, const DEPTH: u8> BridgeTree<H, DEPTH> {
 
         let saved_idx = self
             .lookup_prior_bridge(position)
-            .map_err(|_| BridgeTreeError::PositionNotMarked(position))?;
+            .map_err(|_| unlikely(|| BridgeTreeError::PositionNotMarked(position)))?;
 
         let prior_frontier = &self.prior_bridges[saved_idx];
 
@@ -391,6 +394,14 @@ impl<H: Hashable + Clone, const DEPTH: u8> BridgeTree<H, DEPTH> {
             })
             .map_err(BridgeTreeError::MissingOmmer)
     }
+}
+
+/// Utility that can be used to mark cold paths in
+/// if-branches, in order to optimize codegen.
+#[cold]
+#[inline(never)]
+fn unlikely<R, F: FnOnce() -> R>(f: F) -> R {
+    f()
 }
 
 #[cfg(test)]
