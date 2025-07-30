@@ -23,4 +23,5 @@ incrementalmerkletree-testing = "=0.2.0-backcompat.0.8"
 proptest = "1"
 
 [features]
+std = []
 test-dependencies = ["proptest"]
