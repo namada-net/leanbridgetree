@@ -33,6 +33,7 @@ be dual licensed as above, without any additional terms or conditions.
 ## Original work
 
 This crate is a heavily modified fork of the excellent [`bridgetree`] crate from
-Zcash Zebra.
+Zcash Zebra. The fork started by creating a new commit history from the tree at
+`b93e70980009caa857d244e7c4c8f1992bd4a478` in the original repository.
 
 [`bridgetree`]: https://github.com/zcash/incrementalmerkletree/tree/main/bridgetree
