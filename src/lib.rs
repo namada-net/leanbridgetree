@@ -33,7 +33,7 @@ use alloc::vec::Vec;
 use core::fmt::Debug;
 
 pub use incrementalmerkletree::{
-    frontier::NonEmptyFrontier, Address, Hashable, Level, Position, Retention, Source,
+    Address, Hashable, Level, Position, Source, frontier::NonEmptyFrontier,
 };
 
 /// A sparse representation of a Merkle tree with linear appending of leaves that contains enough
@@ -374,9 +374,9 @@ mod tests {
     use super::*;
     use incrementalmerkletree::Hashable;
     use incrementalmerkletree_testing::{
-        self as testing, apply_operation, arb_operation, check_checkpoint_rewind, check_operations,
-        check_remove_mark, check_rewind_remove_mark, check_root_hashes, check_witnesses,
-        complete_tree::CompleteTree, CombinedTree, SipHashable,
+        self as testing, CombinedTree, SipHashable, apply_operation, arb_operation,
+        check_checkpoint_rewind, check_operations, check_remove_mark, check_rewind_remove_mark,
+        check_root_hashes, check_witnesses, complete_tree::CompleteTree,
     };
 
     impl<H: Hashable + Clone + Ord, const DEPTH: u8> testing::Tree<H, usize>
