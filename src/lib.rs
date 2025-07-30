@@ -37,6 +37,9 @@ pub use incrementalmerkletree::{
     Address, Hashable, Level, Position, Source, frontier::NonEmptyFrontier,
 };
 
+#[cfg(feature = "display-error")]
+use thiserror::Error;
+
 /// Sparse representation of a Merkle tree with linear appending of leaves that contains enough
 /// information to produce a witness for any [marked](BridgeTree::mark) leaf.
 #[derive(Default, Clone, PartialEq, Eq)]
@@ -87,15 +90,29 @@ impl<H: Debug, const DEPTH: u8> Debug for BridgeTree<H, DEPTH> {
 
 /// [`BridgeTree`] related errors.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "display-error", derive(Error))]
 pub enum BridgeTreeError {
     /// The tree is full (i.e. has reached is maximum depth) and can no longer acccept new leaves.
+    #[cfg_attr(
+        feature = "display-error",
+        error("Bridge tree has reached its maximum depth and can no longer acccept new leaves")
+    )]
     FullTree,
     /// The bridges aren't contiguous (i.e. their frontier positions aren't monotonically
     /// increasing).
+    #[cfg_attr(
+        feature = "display-error",
+        error("Non-monotonically increasing bridge leaf positions")
+    )]
     Discontinuity,
     /// The requested position is not tracked, therefore we can't generate its witnesses.
+    #[cfg_attr(
+        feature = "display-error",
+        error("{0:?} is not tracked in any of the tree's bridges")
+    )]
     PositionNotMarked(Position),
     /// The tree is missing the data of an ommer at the given address.
+    #[cfg_attr(feature = "display-error", error("Missing ommer data of {0:?}"))]
     MissingOmmer(Address),
 }
 
