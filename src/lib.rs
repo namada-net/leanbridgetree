@@ -176,11 +176,14 @@ impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
     /// consistency.
     pub fn from_parts(
         frontier: Option<NonEmptyFrontier<H>>,
-        prior_bridges: Vec<NonEmptyFrontier<H>>,
+        mut prior_bridges: Vec<NonEmptyFrontier<H>>,
         tracking: BTreeSet<Address>,
         ommers: BTreeMap<Address, H>,
     ) -> Result<Self, BridgeTreeError> {
         Self::check_consistency_internal(&prior_bridges, frontier.as_ref())?;
+
+        // Remove duplicated entries in the marked leaves.
+        prior_bridges.dedup_by_key(|bridge_frontier| bridge_frontier.position());
 
         Ok(Self {
             frontier,
