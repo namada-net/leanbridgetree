@@ -212,20 +212,22 @@ impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
         prior_bridges: &[NonEmptyFrontier<H>],
         current_bridge: Option<&NonEmptyFrontier<H>>,
     ) -> Result<(), BridgeTreeError> {
+        // Make sure the frontier hasn't reached the maximum depth.
         if let Some(frontier) = current_bridge {
             if frontier.position().is_complete_subtree(Level::from(DEPTH)) {
                 return Err(BridgeTreeError::FullTree);
             }
         }
 
+        // Make sure the bridges are ordered in ascending order,
+        // keyed by their frontier leaf's position.
         for (prev, next) in prior_bridges.iter().zip(prior_bridges.iter().skip(1)) {
-            if prev.position() >= next.position() {
+            if prev.position() > next.position() {
                 return Err(BridgeTreeError::Discontinuity);
             }
         }
-
         if let Some((prev, next)) = prior_bridges.last().zip(current_bridge) {
-            if prev.position() >= next.position() {
+            if prev.position() > next.position() {
                 return Err(BridgeTreeError::Discontinuity);
             }
         }
