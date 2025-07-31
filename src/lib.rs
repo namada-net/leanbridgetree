@@ -395,7 +395,7 @@ impl<H: Hashable + Clone + MaybeSend, const DEPTH: u8> BridgeTree<H, DEPTH> {
             // The address of the next incomplete parent note for which
             // we need to find a sibling.
             let parent = address.next_incomplete_parent();
-            assert!(!self.ommers.contains_key(&parent));
+            debug_assert!(!self.ommers.contains_key(&parent));
             self.tracking.insert(parent);
         }
 
