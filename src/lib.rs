@@ -555,8 +555,6 @@ impl<H: Hashable + Clone + MaybeSend, const DEPTH: u8> BridgeTree<H, DEPTH> {
 impl<H: Hashable + Clone + MaybeSend, const DEPTH: u8> BridgeTree<H, DEPTH> {
     /// Remove data that is not necessary for the currently tracked leaves.
     pub fn garbage_collect(&mut self) {
-        extern crate std;
-
         use std::thread;
 
         let ommer_addrs: BTreeSet<_> = self
