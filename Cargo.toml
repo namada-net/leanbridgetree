@@ -14,6 +14,7 @@ license = "MIT OR Apache-2.0"
 categories = ["algorithms", "data-structures"]
 
 [features]
+default = ["std", "display-error"]
 std = ["thiserror/std", "slab/std"]
 display-error = ["dep:thiserror"]
 test-dependencies = ["proptest", "incrementalmerkletree/test-dependencies"]

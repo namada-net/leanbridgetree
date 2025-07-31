@@ -681,7 +681,7 @@ mod tests {
     }
 
     #[allow(dead_code)]
-    impl<H: Clone + Hashable> DynDepthBridgeTree<H> {
+    impl<H: Clone + Hashable + Send> DynDepthBridgeTree<H> {
         fn get(&self, max_depth: u8) -> &dyn testing::Tree<H, ()> {
             match (max_depth & 0xf, self) {
                 (0, DynDepthBridgeTree::Depth0(t)) => t,
@@ -727,7 +727,7 @@ mod tests {
         }
     }
 
-    impl<H: Hashable + Clone, const DEPTH: u8> testing::Tree<H, ()> for BridgeTree<H, DEPTH> {
+    impl<H: Hashable + Clone + Send, const DEPTH: u8> testing::Tree<H, ()> for BridgeTree<H, DEPTH> {
         fn append(&mut self, value: H, retention: Retention<()>) -> bool {
             let appended = BridgeTree::append(self, value).is_ok();
             if appended && retention.is_marked() {
@@ -778,7 +778,7 @@ mod tests {
         max_count: usize,
     ) -> impl Strategy<Value = BridgeTree<G::Value, 8>>
     where
-        G::Value: Hashable + Clone + Debug + 'static,
+        G::Value: Hashable + Clone + Debug + Send + 'static,
     {
         let pos_gen = (0..max_count).prop_map(|p| Position::try_from(p).unwrap());
         proptest::collection::vec(arb_operation(item_gen, pos_gen), 0..max_count).prop_map(|ops| {
@@ -854,7 +854,7 @@ mod tests {
         }
     }
 
-    fn new_tree<H: Hashable + Clone + Debug>() -> BridgeTree<H, 4> {
+    fn new_tree<H: Hashable + Clone + Debug + Send>() -> BridgeTree<H, 4> {
         BridgeTree::new()
     }
 
