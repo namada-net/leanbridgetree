@@ -25,7 +25,7 @@
 //! - Ommer – sibling of a parent node in a binary tree.
 //! - Bridge - past frontier and ommer data necessary to witness leaves before the latest frontier.
 
-#![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(all(not(feature = "std"), not(test)), no_std)]
 
 extern crate alloc;
 
