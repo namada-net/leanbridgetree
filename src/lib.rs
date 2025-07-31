@@ -332,6 +332,12 @@ impl<H: Hashable + Clone, const DEPTH: u8> BridgeTree<H, DEPTH> {
     /// interested in maintaining a mark for.
     ///
     /// Returns an error if we were already not maintaining a mark at this position.
+    ///
+    /// ## Warning
+    ///
+    /// This method does not remove the tracking data associated with
+    /// `position`. Use [`BridgeTree::remove_mark_and_gc`] if you want
+    /// to automate this process.
     pub fn remove_mark(&mut self, position: Position) -> Result<(), BridgeTreeError> {
         // Figure out where the marked leaf is in the vector of bridges.
         let index_of_marked_leaf_bridge = self
@@ -342,9 +348,13 @@ impl<H: Hashable + Clone, const DEPTH: u8> BridgeTree<H, DEPTH> {
         // in the vector in O(n) time.
         self.prior_bridges.remove(index_of_marked_leaf_bridge);
 
-        // Let's also get rid of the tracking data.
-        self.garbage_collect();
+        Ok(())
+    }
 
+    /// Convenience method for [`BridgeTree::remove_mark`] and [`BridgeTree::garbage_collect`].
+    pub fn remove_mark_and_gc(&mut self, position: Position) -> Result<(), BridgeTreeError> {
+        self.remove_mark(position)?;
+        self.garbage_collect();
         Ok(())
     }
 
@@ -552,7 +562,7 @@ mod tests {
         }
 
         fn remove_mark(&mut self, position: Position) -> bool {
-            BridgeTree::remove_mark(self, position).is_ok()
+            BridgeTree::remove_mark_and_gc(self, position).is_ok()
         }
 
         fn checkpoint(&mut self, _id: ()) -> bool {
