@@ -410,31 +410,113 @@ fn unlikely<R, F: FnOnce() -> R>(f: F) -> R {
 }
 
 #[cfg(test)]
-#[cfg(DISABLED)]
 mod tests {
-    use proptest::prelude::*;
     use std::fmt::Debug;
 
-    use super::*;
-    use incrementalmerkletree::Hashable;
+    use incrementalmerkletree::Retention;
     use incrementalmerkletree_testing::{
-        self as testing, CombinedTree, SipHashable, apply_operation, arb_operation,
-        check_checkpoint_rewind, check_operations, check_remove_mark, check_rewind_remove_mark,
-        check_root_hashes, check_witnesses, complete_tree::CompleteTree,
+        self as testing, SipHashable, TestHashable, apply_operation, arb_operation,
+        check_operations,
     };
+    use proptest::prelude::*;
 
-    impl<H: Hashable + Clone + Ord, const DEPTH: u8> testing::Tree<H, usize>
-        for BridgeTree<H, usize, DEPTH>
-    {
-        fn append(&mut self, value: H, retention: Retention<usize>) -> bool {
-            let appended = BridgeTree::append(self, value);
-            if appended {
-                if retention.is_marked() {
-                    BridgeTree::mark(self);
-                }
-                if let Retention::Checkpoint { id, .. } = retention {
-                    BridgeTree::checkpoint(self, id);
-                }
+    use super::*;
+
+    enum DynDepthBridgeTree<H> {
+        Depth0(BridgeTree<H, 0>),
+        Depth1(BridgeTree<H, 1>),
+        Depth2(BridgeTree<H, 2>),
+        Depth3(BridgeTree<H, 3>),
+        Depth4(BridgeTree<H, 4>),
+        Depth5(BridgeTree<H, 5>),
+        Depth6(BridgeTree<H, 6>),
+        Depth7(BridgeTree<H, 7>),
+        Depth8(BridgeTree<H, 8>),
+        Depth9(BridgeTree<H, 9>),
+        Depth10(BridgeTree<H, 10>),
+        Depth11(BridgeTree<H, 11>),
+        Depth12(BridgeTree<H, 12>),
+        Depth13(BridgeTree<H, 13>),
+        Depth14(BridgeTree<H, 14>),
+        Depth15(BridgeTree<H, 15>),
+    }
+
+    impl<H> DynDepthBridgeTree<H> {
+        const fn new(depth: u8) -> Self {
+            match depth & 0xf {
+                0 => Self::Depth0(BridgeTree::new()),
+                1 => Self::Depth1(BridgeTree::new()),
+                2 => Self::Depth2(BridgeTree::new()),
+                3 => Self::Depth3(BridgeTree::new()),
+                4 => Self::Depth4(BridgeTree::new()),
+                5 => Self::Depth5(BridgeTree::new()),
+                6 => Self::Depth6(BridgeTree::new()),
+                7 => Self::Depth7(BridgeTree::new()),
+                8 => Self::Depth8(BridgeTree::new()),
+                9 => Self::Depth9(BridgeTree::new()),
+                10 => Self::Depth10(BridgeTree::new()),
+                11 => Self::Depth11(BridgeTree::new()),
+                12 => Self::Depth12(BridgeTree::new()),
+                13 => Self::Depth13(BridgeTree::new()),
+                14 => Self::Depth14(BridgeTree::new()),
+                15 => Self::Depth15(BridgeTree::new()),
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    impl<H: Clone + Hashable> DynDepthBridgeTree<H> {
+        fn get(&self, max_depth: u8) -> &dyn testing::Tree<H, ()> {
+            match (max_depth & 0xf, self) {
+                (0, DynDepthBridgeTree::Depth0(t)) => t,
+                (1, DynDepthBridgeTree::Depth1(t)) => t,
+                (2, DynDepthBridgeTree::Depth2(t)) => t,
+                (3, DynDepthBridgeTree::Depth3(t)) => t,
+                (4, DynDepthBridgeTree::Depth4(t)) => t,
+                (5, DynDepthBridgeTree::Depth5(t)) => t,
+                (6, DynDepthBridgeTree::Depth6(t)) => t,
+                (7, DynDepthBridgeTree::Depth7(t)) => t,
+                (8, DynDepthBridgeTree::Depth8(t)) => t,
+                (9, DynDepthBridgeTree::Depth9(t)) => t,
+                (10, DynDepthBridgeTree::Depth10(t)) => t,
+                (11, DynDepthBridgeTree::Depth11(t)) => t,
+                (12, DynDepthBridgeTree::Depth12(t)) => t,
+                (13, DynDepthBridgeTree::Depth13(t)) => t,
+                (14, DynDepthBridgeTree::Depth14(t)) => t,
+                (15, DynDepthBridgeTree::Depth15(t)) => t,
+                _ => panic!("called get on tree of invalid depth"),
+            }
+        }
+
+        fn get_mut(&mut self, max_depth: u8) -> &mut dyn testing::Tree<H, ()> {
+            match (max_depth & 0xf, self) {
+                (0, DynDepthBridgeTree::Depth0(t)) => t,
+                (1, DynDepthBridgeTree::Depth1(t)) => t,
+                (2, DynDepthBridgeTree::Depth2(t)) => t,
+                (3, DynDepthBridgeTree::Depth3(t)) => t,
+                (4, DynDepthBridgeTree::Depth4(t)) => t,
+                (5, DynDepthBridgeTree::Depth5(t)) => t,
+                (6, DynDepthBridgeTree::Depth6(t)) => t,
+                (7, DynDepthBridgeTree::Depth7(t)) => t,
+                (8, DynDepthBridgeTree::Depth8(t)) => t,
+                (9, DynDepthBridgeTree::Depth9(t)) => t,
+                (10, DynDepthBridgeTree::Depth10(t)) => t,
+                (11, DynDepthBridgeTree::Depth11(t)) => t,
+                (12, DynDepthBridgeTree::Depth12(t)) => t,
+                (13, DynDepthBridgeTree::Depth13(t)) => t,
+                (14, DynDepthBridgeTree::Depth14(t)) => t,
+                (15, DynDepthBridgeTree::Depth15(t)) => t,
+                _ => panic!("called get on tree of invalid depth"),
+            }
+        }
+    }
+
+    impl<H: Hashable + Clone, const DEPTH: u8> testing::Tree<H, ()> for BridgeTree<H, DEPTH> {
+        fn append(&mut self, value: H, retention: Retention<()>) -> bool {
+            let appended = BridgeTree::append(self, value).is_ok();
+            if appended && retention.is_marked() {
+                BridgeTree::mark(self).unwrap();
             }
             appended
         }
@@ -452,67 +534,42 @@ mod tests {
         }
 
         fn marked_positions(&self) -> BTreeSet<Position> {
-            BridgeTree::marked_positions(self)
+            BridgeTree::marked_positions(self).collect()
         }
 
-        fn root(&self, checkpoint_depth: usize) -> Option<H> {
-            BridgeTree::root(self, checkpoint_depth)
+        fn root(&self, _checkpoint_depth: usize) -> Option<H> {
+            Some(BridgeTree::root(self))
         }
 
-        fn witness(&self, position: Position, checkpoint_depth: usize) -> Option<Vec<H>> {
-            BridgeTree::witness(self, position, checkpoint_depth).ok()
+        fn witness(&self, position: Position, _checkpoint_depth: usize) -> Option<Vec<H>> {
+            BridgeTree::witness(self, position).ok()
         }
 
         fn remove_mark(&mut self, position: Position) -> bool {
-            BridgeTree::remove_mark(self, position)
+            BridgeTree::remove_mark(self, position).is_ok()
         }
 
-        fn checkpoint(&mut self, id: usize) -> bool {
-            BridgeTree::checkpoint(self, id)
+        fn checkpoint(&mut self, _id: ()) -> bool {
+            false
         }
 
         fn rewind(&mut self) -> bool {
-            BridgeTree::rewind(self)
-        }
-    }
-
-    #[test]
-    fn tree_depth() {
-        let mut tree = BridgeTree::<String, usize, 3>::new(100);
-        for c in 'a'..'i' {
-            assert!(tree.append(c.to_string()))
-        }
-        assert!(!tree.append('i'.to_string()));
-    }
-
-    fn check_garbage_collect<H: Hashable + Clone + Ord + Debug, const DEPTH: u8>(
-        mut tree: BridgeTree<H, usize, DEPTH>,
-    ) {
-        // Add checkpoints until we're sure everything that can be gc'ed will be gc'ed
-        for i in 0..tree.max_checkpoints {
-            tree.checkpoint(i + 1);
-        }
-
-        let mut tree_mut = tree.clone();
-        tree_mut.garbage_collect();
-
-        for pos in tree.saved.keys() {
-            assert_eq!(tree.witness(*pos, 0), tree_mut.witness(*pos, 0));
+            false
         }
     }
 
     fn arb_bridgetree<G: Strategy + Clone>(
         item_gen: G,
         max_count: usize,
-    ) -> impl Strategy<Value = BridgeTree<G::Value, usize, 8>>
+    ) -> impl Strategy<Value = BridgeTree<G::Value, 8>>
     where
-        G::Value: Hashable + Clone + Ord + Debug + 'static,
+        G::Value: Hashable + Clone + Debug + 'static,
     {
         let pos_gen = (0..max_count).prop_map(|p| Position::try_from(p).unwrap());
         proptest::collection::vec(arb_operation(item_gen, pos_gen), 0..max_count).prop_map(|ops| {
-            let mut tree: BridgeTree<G::Value, usize, 8> = BridgeTree::new(10);
-            for (i, op) in ops.into_iter().enumerate() {
-                apply_operation(&mut tree, op.map_checkpoint_id(|_| i));
+            let mut tree: BridgeTree<G::Value, 8> = BridgeTree::new();
+            for op in ops {
+                apply_operation(&mut tree, op.map_checkpoint_id(|_| ()));
             }
             tree
         })
@@ -523,126 +580,71 @@ mod tests {
         fn bridgetree_from_parts(
             tree in arb_bridgetree((97u8..123).prop_map(|c| char::from(c).to_string()), 100)
         ) {
-            assert_eq!(
-                BridgeTree::from_parts(
-                    tree.prior_bridges.clone(),
-                    tree.current_bridge.clone(),
-                    tree.saved.clone(),
-                    tree.checkpoints.clone(),
-                    tree.max_checkpoints
-                ),
-                Ok(tree),
-            );
+            let tree_from_parts = BridgeTree::from_parts(
+                tree.frontier.as_ref().cloned(),
+                tree.prior_bridges.clone(),
+                tree.tracking.clone(),
+                tree.ommers.clone(),
+            )
+            .unwrap();
+
+            assert_eq!(tree_from_parts, tree);
         }
 
         #[test]
-        fn prop_garbage_collect(
-            tree in arb_bridgetree((97u8..123).prop_map(|c| char::from(c).to_string()), 100)
-        ) {
-            check_garbage_collect(tree);
-        }
-    }
-
-    #[test]
-    fn root_hashes() {
-        check_root_hashes(BridgeTree::<String, usize, 4>::new);
-    }
-
-    #[test]
-    fn witness() {
-        check_witnesses(BridgeTree::<String, usize, 4>::new);
-    }
-
-    #[test]
-    fn checkpoint_rewind() {
-        check_checkpoint_rewind(|max_checkpoints| {
-            BridgeTree::<String, usize, 4>::new(max_checkpoints)
-        });
-    }
-
-    #[test]
-    fn rewind_remove_mark() {
-        check_rewind_remove_mark(|max_checkpoints| {
-            BridgeTree::<String, usize, 4>::new(max_checkpoints)
-        });
-    }
-
-    #[test]
-    fn garbage_collect() {
-        let mut tree: BridgeTree<String, usize, 7> = BridgeTree::new(1000);
-        let empty_root = tree.root(0);
-        tree.append("a".to_string());
-        for i in 0..100 {
-            tree.checkpoint(i + 1);
-        }
-        tree.garbage_collect();
-        assert!(tree.root(0) != empty_root);
-        tree.rewind();
-        assert!(tree.root(0) != empty_root);
-
-        let mut t = BridgeTree::<String, usize, 7>::new(10);
-        let mut to_unmark = vec![];
-        let mut has_witness = vec![];
-        for i in 0u64..100 {
-            let elem: String = format!("{},", i);
-            assert!(t.append(elem), "Append should succeed.");
-            if i % 5 == 0 {
-                t.checkpoint(usize::try_from(i).unwrap() + 1);
+        fn tree_depth(max_depth in 0u8..16) {
+            let mut t = DynDepthBridgeTree::<String>::new(max_depth);
+            let max_leaves = 1u64 << max_depth;
+            for i in 0..max_leaves {
+                assert!(t.get_mut(max_depth).append(format!("{i}"), Retention::Ephemeral));
             }
-            if i % 7 == 0 {
-                t.mark();
-                if i > 0 && i % 2 == 0 {
-                    to_unmark.push(Position::from(i));
-                } else {
-                    has_witness.push(Position::from(i));
+            assert!(!t.get_mut(max_depth).append(format!("{max_depth}"), Retention::Ephemeral));
+        }
+
+        #[test]
+        fn compare_against_upstream_bridgetree(
+            values in proptest::collection::vec((0..=25u64, any::<bool>()), 1..256)
+        )
+        {
+            let mut upstream = bridgetree::BridgeTree::<String, (), 8>::new(1);
+            let mut forked = BridgeTree::<String, 8>::new();
+
+            let mut marked_pos = vec![];
+
+            for (pos, (value, mark)) in values.into_iter().enumerate() {
+                assert!(upstream.append(String::from_u64(value)));
+                assert!(forked.append(String::from_u64(value)).is_ok());
+
+                if mark {
+                    assert!(upstream.mark().is_some());
+                    assert!(forked.mark().is_some());
+
+                    marked_pos.push(pos as u64);
                 }
             }
-            if i % 11 == 0 && !to_unmark.is_empty() {
-                let pos = to_unmark.remove(0);
-                t.remove_mark(pos);
+
+            // check the roots are identical
+            assert_eq!(
+                upstream.root(0).unwrap(),
+                forked.root(),
+            );
+
+            // check that witnesses are identical
+            for pos in marked_pos {
+                assert_eq!(
+                    upstream.witness(pos.into(), 0).unwrap(),
+                    forked.witness(pos.into()).unwrap(),
+                );
             }
         }
-        // 32 = 20 (checkpointed) + 14 (marked) - 2 (marked & checkpointed)
-        assert_eq!(t.prior_bridges().len(), 20 + 14 - 2);
-        let witness = has_witness
-            .iter()
-            .map(|pos| match t.witness(*pos, 0) {
-                Ok(path) => path,
-                Err(e) => panic!("Failed to get auth path: {:?}", e),
-            })
-            .collect::<Vec<_>>();
-        t.garbage_collect();
-        // 20 = 32 - 10 (removed checkpoints) + 1 (not removed due to mark) - 3 (removed marks)
-        assert_eq!(t.prior_bridges().len(), 32 - 10 + 1 - 3);
-        let retained_witness = has_witness
-            .iter()
-            .map(|pos| t.witness(*pos, 0).expect("Must be able to get auth path"))
-            .collect::<Vec<_>>();
-        assert_eq!(witness, retained_witness);
     }
 
-    // Combined tree tests
-    fn new_combined_tree<H: Hashable + Clone + Ord + Debug>(
-        max_checkpoints: usize,
-    ) -> CombinedTree<H, usize, CompleteTree<H, usize, 4>, BridgeTree<H, usize, 4>> {
-        CombinedTree::new(
-            CompleteTree::<H, usize, 4>::new(max_checkpoints),
-            BridgeTree::<H, usize, 4>::new(max_checkpoints),
-        )
-    }
-
-    #[test]
-    fn combined_remove_mark() {
-        check_remove_mark(new_combined_tree);
-    }
-
-    #[test]
-    fn combined_rewind_remove_mark() {
-        check_rewind_remove_mark(new_combined_tree);
+    fn new_tree<H: Hashable + Clone + Debug>() -> BridgeTree<H, 4> {
+        BridgeTree::new()
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(100000))]
+        //#![proptest_config(ProptestConfig::with_cases(100000))]
 
         #[test]
         fn check_randomized_u64_ops(
@@ -654,9 +656,18 @@ mod tests {
                 1..100
             )
         ) {
-            let tree = new_combined_tree(100);
-            let indexed_ops = ops.iter().enumerate().map(|(i, op)| op.map_checkpoint_id(|_| i + 1)).collect::<Vec<_>>();
-            check_operations(tree, &indexed_ops)?;
+            let tree = new_tree();
+            let ops = ops
+                .into_iter()
+                .map(|op| {
+                    match op {
+                        incrementalmerkletree_testing::Operation::Witness(pos, _)
+                            => incrementalmerkletree_testing::Operation::Witness(pos, 0),
+                        op => op,
+                    }
+                })
+                .collect::<Vec<_>>();
+            check_operations(tree, &ops)?;
         }
 
         #[test]
@@ -669,9 +680,316 @@ mod tests {
                 1..100
             )
         ) {
-            let tree = new_combined_tree(100);
-            let indexed_ops = ops.iter().enumerate().map(|(i, op)| op.map_checkpoint_id(|_| i + 1)).collect::<Vec<_>>();
-            check_operations(tree, &indexed_ops)?;
+            let tree = new_tree();
+            let ops = ops
+                .into_iter()
+                .map(|op| {
+                    match op {
+                        incrementalmerkletree_testing::Operation::Witness(pos, _)
+                            => incrementalmerkletree_testing::Operation::Witness(pos, 0),
+                        op => op,
+                    }
+                })
+                .collect::<Vec<_>>();
+            check_operations(tree, &ops)?;
+        }
+    }
+
+    #[test]
+    fn root_hashes() {
+        {
+            let mut tree = new_tree::<String>();
+            tree.assert_root(&[]);
+            tree.assert_append(0, incrementalmerkletree::Retention::Ephemeral);
+            tree.assert_root(&[0]);
+            tree.assert_append(1, incrementalmerkletree::Retention::Ephemeral);
+            tree.assert_root(&[0, 1]);
+            tree.assert_append(2, incrementalmerkletree::Retention::Ephemeral);
+            tree.assert_root(&[0, 1, 2]);
+        }
+
+        {
+            let mut t = new_tree::<String>();
+            t.assert_append(0, Retention::Marked);
+            for _ in 0..3 {
+                t.assert_append(0, incrementalmerkletree::Retention::Ephemeral);
+            }
+            t.assert_root(&[0, 0, 0, 0]);
+        }
+    }
+
+    #[test]
+    fn witness() {
+        use Retention::*;
+        use incrementalmerkletree_testing::Operation;
+        use incrementalmerkletree_testing::Operation::Append;
+        use incrementalmerkletree_testing::Operation::Witness;
+
+        {
+            let mut tree = new_tree::<String>();
+            tree.assert_append(0, Ephemeral);
+            tree.assert_append(1, Marked);
+            assert_eq!(testing::Tree::witness(&tree, Position::from(0), 0), None);
+        }
+
+        {
+            let mut tree = new_tree::<String>();
+            tree.assert_append(0, Marked);
+            assert_eq!(
+                testing::Tree::witness(&tree, Position::from(0), 0),
+                Some(vec![
+                    String::empty_root(0.into()),
+                    String::empty_root(1.into()),
+                    String::empty_root(2.into()),
+                    String::empty_root(3.into())
+                ])
+            );
+
+            tree.assert_append(1, Ephemeral);
+            assert_eq!(
+                testing::Tree::witness(&tree, 0.into(), 0),
+                Some(vec![
+                    String::from_u64(1),
+                    String::empty_root(1.into()),
+                    String::empty_root(2.into()),
+                    String::empty_root(3.into())
+                ])
+            );
+
+            tree.assert_append(2, Marked);
+            assert_eq!(
+                testing::Tree::witness(&tree, Position::from(2), 0),
+                Some(vec![
+                    String::empty_root(0.into()),
+                    String::combine_all(1, &[0, 1]),
+                    String::empty_root(2.into()),
+                    String::empty_root(3.into())
+                ])
+            );
+
+            tree.assert_append(3, Ephemeral);
+            assert_eq!(
+                testing::Tree::witness(&tree, Position::from(2), 0),
+                Some(vec![
+                    String::from_u64(3),
+                    String::combine_all(1, &[0, 1]),
+                    String::empty_root(2.into()),
+                    String::empty_root(3.into())
+                ])
+            );
+
+            tree.assert_append(4, Ephemeral);
+            assert_eq!(
+                testing::Tree::witness(&tree, Position::from(2), 0),
+                Some(vec![
+                    String::from_u64(3),
+                    String::combine_all(1, &[0, 1]),
+                    String::combine_all(2, &[4]),
+                    String::empty_root(3.into())
+                ])
+            );
+        }
+
+        {
+            let mut tree = new_tree::<String>();
+            tree.assert_append(0, Marked);
+            for i in 1..6 {
+                tree.assert_append(i, Ephemeral);
+            }
+            tree.assert_append(6, Marked);
+            tree.assert_append(7, Ephemeral);
+
+            assert_eq!(
+                testing::Tree::witness(&tree, 0.into(), 0),
+                Some(vec![
+                    String::from_u64(1),
+                    String::combine_all(1, &[2, 3]),
+                    String::combine_all(2, &[4, 5, 6, 7]),
+                    String::empty_root(3.into())
+                ])
+            );
+        }
+
+        {
+            let mut tree = new_tree::<String>();
+            tree.assert_append(0, Marked);
+            tree.assert_append(1, Ephemeral);
+            tree.assert_append(2, Ephemeral);
+            tree.assert_append(3, Marked);
+            tree.assert_append(4, Marked);
+            tree.assert_append(5, Marked);
+            tree.assert_append(6, Ephemeral);
+
+            assert_eq!(
+                testing::Tree::witness(&tree, Position::from(5), 0),
+                Some(vec![
+                    String::from_u64(4),
+                    String::combine_all(1, &[6]),
+                    String::combine_all(2, &[0, 1, 2, 3]),
+                    String::empty_root(3.into())
+                ])
+            );
+        }
+
+        {
+            let mut tree = new_tree::<String>();
+            for i in 0..10 {
+                tree.assert_append(i, Ephemeral);
+            }
+            tree.assert_append(10, Marked);
+            tree.assert_append(11, Ephemeral);
+
+            assert_eq!(
+                testing::Tree::witness(&tree, Position::from(10), 0),
+                Some(vec![
+                    String::from_u64(11),
+                    String::combine_all(1, &[8, 9]),
+                    String::empty_root(2.into()),
+                    String::combine_all(3, &[0, 1, 2, 3, 4, 5, 6, 7])
+                ])
+            );
+        }
+
+        {
+            let mut tree = new_tree::<String>();
+            for i in 0..12 {
+                tree.assert_append(i, Ephemeral);
+            }
+            tree.assert_append(12, Marked);
+            tree.assert_append(13, Marked);
+            tree.assert_append(14, Ephemeral);
+            tree.assert_append(15, Ephemeral);
+
+            assert_eq!(
+                testing::Tree::witness(&tree, Position::from(12), 0),
+                Some(vec![
+                    String::from_u64(13),
+                    String::combine_all(1, &[14, 15]),
+                    String::combine_all(2, &[8, 9, 10, 11]),
+                    String::combine_all(3, &[0, 1, 2, 3, 4, 5, 6, 7]),
+                ])
+            );
+        }
+
+        {
+            let ops = (0..=11)
+                .map(|i| Append(String::from_u64(i), Marked))
+                .chain(Some(Append(String::from_u64(12), Ephemeral)))
+                .chain(Some(Append(String::from_u64(13), Ephemeral)))
+                .chain(Some(Witness(11u64.into(), 0)))
+                .collect::<Vec<_>>();
+
+            let mut tree = new_tree::<String>();
+            assert_eq!(
+                Operation::apply_all(&ops, &mut tree),
+                Some((
+                    Position::from(11),
+                    vec![
+                        String::from_u64(10),
+                        String::combine_all(1, &[8, 9]),
+                        String::combine_all(2, &[12, 13]),
+                        String::combine_all(3, &[0, 1, 2, 3, 4, 5, 6, 7]),
+                    ]
+                ))
+            );
+        }
+
+        {
+            let ops = vec![
+                Append(String::from_u64(0), Ephemeral),
+                Append(String::from_u64(1), Ephemeral),
+                Append(String::from_u64(2), Ephemeral),
+                Append(String::from_u64(3), Marked),
+                Append(String::from_u64(4), Marked),
+                Append(String::from_u64(5), Ephemeral),
+                Append(String::from_u64(6), Ephemeral),
+                Append(String::from_u64(7), Ephemeral),
+                Witness(3u64.into(), 4),
+            ];
+            let mut tree = new_tree::<String>();
+            assert_eq!(
+                Operation::apply_all(&ops, &mut tree),
+                Some((
+                    Position::from(3),
+                    vec![
+                        String::from_u64(2),
+                        String::combine_all(1, &[0, 1]),
+                        String::combine_all(2, &[4, 5, 6, 7]),
+                        String::combine_all(3, &[]),
+                    ]
+                ))
+            );
+        }
+
+        {
+            let ops = vec![
+                Append(String::from_u64(0), Ephemeral),
+                Append(String::from_u64(0), Ephemeral),
+                Append(String::from_u64(0), Ephemeral),
+                Append(String::from_u64(0), Marked),
+                Append(String::from_u64(0), Ephemeral),
+                Append(String::from_u64(0), Ephemeral),
+                Append(String::from_u64(0), Ephemeral),
+                Append(String::from_u64(0), Ephemeral),
+                Append(String::from_u64(0), Ephemeral),
+                Append(String::from_u64(0), Ephemeral),
+                Witness(Position::from(3), 0),
+            ];
+            let mut tree = new_tree::<String>();
+            assert_eq!(
+                Operation::apply_all(&ops, &mut tree),
+                Some((
+                    Position::from(3),
+                    vec![
+                        String::from_u64(0),
+                        String::combine_all(1, &[0, 0]),
+                        String::combine_all(2, &[0, 0, 0, 0]),
+                        String::combine_all(3, &[0, 0]),
+                    ]
+                ))
+            );
+        }
+
+        {
+            let ops = vec![
+                Append(String::from_u64(0), Marked),
+                Append(String::from_u64(0), Ephemeral),
+                Append(String::from_u64(0), Marked),
+                Append(String::from_u64(0), Ephemeral),
+                Witness(Position::from(2), 1),
+            ];
+            let mut tree = new_tree::<String>();
+            assert_eq!(
+                Operation::apply_all(&ops, &mut tree),
+                Some((
+                    Position::from(2),
+                    vec![
+                        String::from_u64(0),
+                        String::combine_all(1, &[0, 0]),
+                        String::combine_all(2, &[]),
+                        String::combine_all(3, &[]),
+                    ]
+                ))
+            );
+        }
+    }
+
+    trait TestTree<H: TestHashable> {
+        fn assert_root(&self, values: &[u64]);
+
+        fn assert_append(&mut self, value: u64, retention: incrementalmerkletree::Retention<()>);
+    }
+
+    impl<H: TestHashable, T: testing::Tree<H, ()>> TestTree<H> for T {
+        fn assert_root(&self, values: &[u64]) {
+            assert_eq!(self.root(0).unwrap(), H::combine_all(self.depth(), values));
+        }
+
+        fn assert_append(&mut self, value: u64, retention: incrementalmerkletree::Retention<()>) {
+            assert!(
+                self.append(H::from_u64(value), retention),
+                "append failed for value {value}",
+            );
         }
     }
 }
