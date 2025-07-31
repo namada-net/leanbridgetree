@@ -504,10 +504,14 @@ impl<H: Hashable + Clone + MaybeSend, const DEPTH: u8> BridgeTree<H, DEPTH> {
         Ok(())
     }
 
-    /// Convenience method for [`BridgeTree::remove_mark`] and [`BridgeTree::garbage_collect`].
+    /// Convenience method for calling [`BridgeTree::remove_mark`] and [`BridgeTree::garbage_collect`]
+    /// in sequence.
     ///
-    /// In general, it is preferred to batch calls to [`BridgeTree::remove_mark`], then have
-    /// a single call to [`BridgeTree::garbage_collect`], as this will be more efficient.
+    /// ## Performance
+    ///
+    /// In general, it is preferred to call [`BridgeTree::remove_multiple_marks`], then have
+    /// a single call to [`BridgeTree::garbage_collect`], as this will be **significantly**
+    /// more efficient.
     pub fn remove_mark_and_gc(&mut self, position: Position) -> Result<(), BridgeTreeError> {
         self.remove_mark(position)?;
         self.garbage_collect();
