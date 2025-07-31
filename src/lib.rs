@@ -316,7 +316,16 @@ impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
         let index = self.lookup_prior_bridge_slab_index(position).ok()?;
 
         // NB: This is the key into the slab.
-        let key = unsafe { *self.prior_bridges_slab_keys.get_unchecked(index) };
+        let key = {
+            #[cfg(debug_assertions)]
+            {
+                self.prior_bridges_slab_keys[index]
+            }
+            #[cfg(not(debug_assertions))]
+            unsafe {
+                *self.prior_bridges_slab_keys.get_unchecked(index)
+            }
+        };
 
         // Don't mix up these values, which are both `usize`! It's important
         // to understand the difference between them, otherwise none of these
