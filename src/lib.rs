@@ -469,6 +469,41 @@ impl<H: Hashable + Clone + MaybeSend, const DEPTH: u8> BridgeTree<H, DEPTH> {
         Ok(())
     }
 
+    /// Remove multiple marked leaves in a batch.
+    ///
+    /// Unlike [`BridgeTree::remove_mark`], this is optimized for batch
+    /// processing of many marks to be removed.
+    ///
+    /// ## Warning
+    ///
+    /// This method does not remove the tracking data associated with
+    /// `positions`. Use [`BridgeTree::garbage_collect`] to get rid of
+    /// this data.
+    pub fn remove_multiple_marks<I>(&mut self, positions: I) -> Result<(), BridgeTreeError>
+    where
+        I: IntoIterator<Item = Position>,
+    {
+        let keys_of_marked_leaf_bridges = positions
+            .into_iter()
+            .map(|position| {
+                let index = self
+                    .lookup_prior_bridge_slab_index(position)
+                    .map_err(|_| unlikely(|| BridgeTreeError::PositionNotMarked(position)))?;
+
+                Ok(unsafe { *self.prior_bridges_slab_keys.get_unchecked(index) })
+            })
+            .collect::<Result<BTreeSet<_>, _>>()?;
+
+        self.prior_bridges_slab_keys
+            .retain(|key| !keys_of_marked_leaf_bridges.contains(key));
+
+        for key in keys_of_marked_leaf_bridges {
+            self.prior_bridges_slab.remove(key);
+        }
+
+        Ok(())
+    }
+
     /// Convenience method for [`BridgeTree::remove_mark`] and [`BridgeTree::garbage_collect`].
     ///
     /// In general, it is preferred to batch calls to [`BridgeTree::remove_mark`], then have
