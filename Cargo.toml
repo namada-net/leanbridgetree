@@ -24,6 +24,11 @@ proptest = { version = "1", optional = true }
 thiserror = { version = "2.0.12", optional = true }
 
 [dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
 bridgetree = "0.7.0"
 incrementalmerkletree-testing = "=0.2.0-backcompat.0.8"
 proptest = "1"
+
+[[bench]]
+name = "leanbridgetree"
+harness = false
