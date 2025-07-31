@@ -343,6 +343,13 @@ impl<H: Hashable + Clone, const DEPTH: u8> BridgeTree<H, DEPTH> {
         self.prior_bridges.remove(index_of_marked_leaf_bridge);
 
         // Let's also get rid of the tracking data.
+        self.garbage_collect();
+
+        Ok(())
+    }
+
+    /// Remove data that is not necessary for the currently tracked leaves.
+    pub fn garbage_collect(&mut self) {
         let ommer_addrs: BTreeSet<_> = self
             .prior_bridges
             .iter()
@@ -359,11 +366,10 @@ impl<H: Hashable + Clone, const DEPTH: u8> BridgeTree<H, DEPTH> {
                     })
             })
             .collect();
+
         self.tracking
             .retain(|addr| ommer_addrs.contains(&addr.sibling()));
         self.ommers.retain(|addr, _| ommer_addrs.contains(addr));
-
-        Ok(())
     }
 
     /// Obtains a witness for the value at the specified leaf position.
