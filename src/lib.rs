@@ -557,6 +557,7 @@ impl<H: Hashable + Clone + MaybeSend, const DEPTH: u8> BridgeTree<H, DEPTH> {
     pub fn garbage_collect(&mut self) {
         use std::thread;
 
+        // TODO: Optimize this
         let ommer_addrs: BTreeSet<_> = self
             .prior_bridges()
             .flat_map(|prior_bridge_frontier| {
@@ -577,14 +578,26 @@ impl<H: Hashable + Clone + MaybeSend, const DEPTH: u8> BridgeTree<H, DEPTH> {
             tracking, ommers, ..
         } = self;
 
-        thread::scope(|s| {
-            s.spawn(|| {
-                tracking.retain(|addr| ommer_addrs.contains(&addr.sibling()));
+        let combined_len = tracking.len() + ommers.len();
+
+        const THREADING_THRESHOLD: usize = 10_000;
+
+        if combined_len < THREADING_THRESHOLD {
+            tracking.retain(|addr| ommer_addrs.contains(&addr.sibling()));
+            ommers.retain(|addr, _| ommer_addrs.contains(addr));
+        } else {
+            unlikely(|| {
+                // Only spawn threads if there are a ton of ommers to remove.
+                thread::scope(|s| {
+                    s.spawn(|| {
+                        tracking.retain(|addr| ommer_addrs.contains(&addr.sibling()));
+                    });
+                    s.spawn(|| {
+                        ommers.retain(|addr, _| ommer_addrs.contains(addr));
+                    });
+                });
             });
-            s.spawn(|| {
-                ommers.retain(|addr, _| ommer_addrs.contains(addr));
-            });
-        });
+        }
     }
 }
 
