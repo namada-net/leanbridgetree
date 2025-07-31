@@ -33,6 +33,8 @@ use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::vec::Vec;
 use core::fmt::Debug;
 
+use slab::Slab;
+
 pub use incrementalmerkletree::{
     Address, Hashable, Level, Position, Source, frontier::NonEmptyFrontier,
 };
@@ -42,13 +44,15 @@ use thiserror::Error;
 
 /// Sparse representation of a Merkle tree with linear appending of leaves that contains enough
 /// information to produce a witness for any [marked](BridgeTree::mark) leaf.
-#[derive(Default, Clone, PartialEq, Eq)]
+#[derive(Default, Clone)]
 pub struct BridgeTree<H, const DEPTH: u8> {
     /// The current (mutable) frontier of the tree.
     frontier: Option<NonEmptyFrontier<H>>,
-    /// Ordered list of Merkle bridges representing the history
+    /// Storage of Merkle bridges.
+    prior_bridges_slab: Slab<NonEmptyFrontier<H>>,
+    /// Ordered list of keys into `prior_bridges_slab`, representing the history
     /// of the tree. There will be one bridge for each saved leaf.
-    prior_bridges: Vec<NonEmptyFrontier<H>>,
+    prior_bridges_slab_keys: Vec<usize>,
     /// Set of addresses for which we are waiting to discover the ommers.  The values of this
     /// set and the keys of the `ommers` map should always be disjoint. Also, this set should
     /// never contain an address for which the sibling value has been discovered; at that point,
@@ -66,22 +70,53 @@ pub struct BridgeTree<H, const DEPTH: u8> {
     ommers: BTreeMap<Address, H>,
 }
 
+impl<const DEPTH: u8, H: Eq> Eq for BridgeTree<H, DEPTH> {}
+
+impl<const DEPTH: u8, H: PartialEq> PartialEq for BridgeTree<H, DEPTH> {
+    fn eq(&self, other: &Self) -> bool {
+        // NB: We destructure `self` in order to catch compiler errors, should
+        // its internal structure ever change. See note below.
+        let Self {
+            frontier,
+            tracking,
+            ommers,
+
+            // NB: Marked as unused, because they get implicitly
+            // used by calling `BridgeTree::prior_bridges`.
+            prior_bridges_slab: _,
+            prior_bridges_slab_keys: _,
+        } = self;
+
+        frontier.eq(&other.frontier)
+            && tracking.eq(&other.tracking)
+            && ommers.eq(&other.ommers)
+            && self.prior_bridges().eq(other.prior_bridges())
+    }
+}
+
 impl<H: Debug, const DEPTH: u8> Debug for BridgeTree<H, DEPTH> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
         // NB: We destructure `self` in order to catch compiler errors, should
         // its internal structure ever change. See note below.
         let Self {
             frontier,
-            prior_bridges,
             tracking,
             ommers,
+
+            // NB: Marked as unused, because they get implicitly
+            // used by calling `BridgeTree::prior_bridges`.
+            prior_bridges_slab: _,
+            prior_bridges_slab_keys: _,
         } = self;
+
+        // Use a friendlier display format for prior bridges.
+        let prior_bridges: Vec<_> = self.prior_bridges().collect();
 
         // XXX: Keep me up to date!
         f.debug_struct(stringify!(BridgeTree))
             .field("max_depth", &DEPTH) // virtual field
             .field("frontier", frontier)
-            .field("prior_bridges", prior_bridges)
+            .field("prior_bridges", &prior_bridges)
             .field("tracking", tracking)
             .field("ommers", ommers)
             .finish()
@@ -120,7 +155,8 @@ impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
     /// Construct an empty [`BridgeTree`].
     pub const fn new() -> Self {
         Self {
-            prior_bridges: Vec::new(),
+            prior_bridges_slab: Slab::new(),
+            prior_bridges_slab_keys: Vec::new(),
             tracking: BTreeSet::new(),
             ommers: BTreeMap::new(),
             frontier: None,
@@ -128,8 +164,29 @@ impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
     }
 
     /// Return the prior bridges that make up this tree
-    pub fn prior_bridges(&self) -> &[NonEmptyFrontier<H>] {
-        &self.prior_bridges
+    pub fn prior_bridges(&self) -> impl Iterator<Item = &NonEmptyFrontier<H>> + '_ {
+        self.prior_bridges_slab_keys
+            .iter()
+            .map(|&index| unsafe { self.get_prior_bridge_by_slab_key_unchecked(index) })
+    }
+
+    /// Return a prior Merkle bridge, given its slab key.
+    ///
+    /// ## Safety
+    ///
+    /// This method doesn't check that the provided `key` exists in the slab of Merkle bridges.
+    /// However, given that the slab is never exposed to users, its underlying structure is fully
+    /// under the control for this crate. Therefore, we never build an invalid storage of
+    /// Merkle bridges. In any case, we should mark this method as `unsafe`.
+    unsafe fn get_prior_bridge_by_slab_key_unchecked(&self, key: usize) -> &NonEmptyFrontier<H> {
+        #[cfg(debug_assertions)]
+        {
+            self.prior_bridges_slab.get(key).unwrap()
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            unsafe { self.prior_bridges_slab.get_unchecked(key) }
+        }
     }
 
     /// Return the bridge's frontier.
@@ -164,12 +221,10 @@ impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
             return Err(BridgeTreeError::FullTree);
         }
 
-        Ok(Self {
-            frontier: Some(frontier),
-            prior_bridges: Vec::new(),
-            tracking: BTreeSet::new(),
-            ommers: BTreeMap::new(),
-        })
+        let mut tree = Self::new();
+        tree.frontier = Some(frontier);
+
+        Ok(tree)
     }
 
     /// Construct a new [`BridgeTree`] from its constituent parts, checking for internal
@@ -185,9 +240,22 @@ impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
         // Remove duplicated entries in the marked leaves.
         prior_bridges.dedup_by_key(|bridge_frontier| bridge_frontier.position());
 
+        // Build the Merkle tree slab.
+        let prior_bridges_slab_keys: Vec<_> = (0..prior_bridges.len()).collect();
+        let prior_bridges_slab = {
+            let mut slab = Slab::new();
+
+            for bridge_frontier in prior_bridges {
+                slab.insert(bridge_frontier);
+            }
+
+            slab
+        };
+
         Ok(Self {
             frontier,
-            prior_bridges,
+            prior_bridges_slab,
+            prior_bridges_slab_keys,
             tracking,
             ommers,
         })
@@ -195,16 +263,15 @@ impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
 
     /// Return an iterator over all the marked leaf positions.
     pub fn marked_positions(&self) -> impl Iterator<Item = Position> + '_ {
-        self.prior_bridges
-            .iter()
+        self.prior_bridges()
             .map(|bridge_frontier| bridge_frontier.position())
     }
 
     /// Returns the leaf at the specified position if the tree can produce
     /// a witness for it.
     pub fn get_marked_leaf(&self, position: Position) -> Option<&H> {
-        let index = self.lookup_prior_bridge(position).ok()?;
-        Some(self.prior_bridges[index].leaf())
+        self.lookup_prior_bridge(position)
+            .map(|bridge_frontier| bridge_frontier.leaf())
     }
 
     /// Verify the integrity of the [`BridgeTree`].
@@ -235,14 +302,40 @@ impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
         Ok(())
     }
 
-    /// Look-up a prior bridge, given the position of a marked leaf.
+    /// Return the last prior bridge.
+    fn last_prior_bridge(&self) -> Option<&NonEmptyFrontier<H>> {
+        self.prior_bridges_slab_keys
+            .last()
+            .map(|&key| unsafe { self.get_prior_bridge_by_slab_key_unchecked(key) })
+    }
+
+    /// Look-up a prior Merkle bridge, given the position of a marked leaf.
+    #[inline]
+    fn lookup_prior_bridge(&self, position: Position) -> Option<&NonEmptyFrontier<H>> {
+        // NB: This is the index into the vector of slab keys.
+        let index = self.lookup_prior_bridge_slab_index(position).ok()?;
+
+        // NB: This is the key into the slab.
+        let key = unsafe { *self.prior_bridges_slab_keys.get_unchecked(index) };
+
+        // Don't mix up these values, which are both `usize`! It's important
+        // to understand the difference between them, otherwise none of these
+        // unsafes will work, and we will encounter UB.
+        Some(unsafe { self.get_prior_bridge_by_slab_key_unchecked(key) })
+    }
+
+    /// Look-up a prior bridge's key in `prior_bridges_slab_keys`, given the position of a marked leaf.
     ///
-    /// Returns the index of the bridge if `Ok`, or where a new bridge
+    /// Returns the index of the bridge key if `Ok`, or where a new bridge
     /// could be inserted, if `Err`.
     #[inline]
-    fn lookup_prior_bridge(&self, position: Position) -> Result<usize, usize> {
-        self.prior_bridges
-            .binary_search_by_key(&position, |bridge_frontier| bridge_frontier.position())
+    fn lookup_prior_bridge_slab_index(&self, position: Position) -> Result<usize, usize> {
+        self.prior_bridges_slab_keys.binary_search_by(|&key| {
+            let bridge_frontier = unsafe { self.get_prior_bridge_by_slab_key_unchecked(key) };
+
+            // Compare the probe position with the bridge frontier's position.
+            bridge_frontier.position().cmp(&position)
+        })
     }
 }
 
@@ -312,12 +405,12 @@ impl<H: Hashable + Clone, const DEPTH: u8> BridgeTree<H, DEPTH> {
         let frontier = self.frontier.as_ref()?;
 
         let last_leaf_already_marked = self
-            .prior_bridges
-            .last()
+            .last_prior_bridge()
             .is_some_and(|bridge_frontier| bridge_frontier.position() == frontier.position());
 
         if !last_leaf_already_marked {
-            self.prior_bridges.push(frontier.clone());
+            let key = self.prior_bridges_slab.insert(frontier.clone());
+            self.prior_bridges_slab_keys.push(key);
             self.tracking
                 .insert(Address::from(frontier.position()).current_incomplete());
         } else {
@@ -339,14 +432,20 @@ impl<H: Hashable + Clone, const DEPTH: u8> BridgeTree<H, DEPTH> {
     /// `position`. Use [`BridgeTree::remove_mark_and_gc`] if you want
     /// to automate this process.
     pub fn remove_mark(&mut self, position: Position) -> Result<(), BridgeTreeError> {
-        // Figure out where the marked leaf is in the vector of bridges.
+        // Figure out where the marked leaf is in the vector of Merkle bridge slab indices.
         let index_of_marked_leaf_bridge = self
-            .lookup_prior_bridge(position)
+            .lookup_prior_bridge_slab_index(position)
             .map_err(|_| unlikely(|| BridgeTreeError::PositionNotMarked(position)))?;
 
-        // Then remove it. This shifts all bridges following `index_of_marked_leaf_bridge`
-        // in the vector in O(n) time.
-        self.prior_bridges.remove(index_of_marked_leaf_bridge);
+        // Remove the index from the vector. This shifts all bridge indices following
+        // `index_of_marked_leaf_bridge` in the vector in O(n) time, and returns the
+        // key of the removed bridge.
+        let key = self
+            .prior_bridges_slab_keys
+            .remove(index_of_marked_leaf_bridge);
+
+        // Remove the actual bridge. This completes in O(1) time.
+        self.prior_bridges_slab.remove(key);
 
         Ok(())
     }
@@ -361,8 +460,7 @@ impl<H: Hashable + Clone, const DEPTH: u8> BridgeTree<H, DEPTH> {
     /// Remove data that is not necessary for the currently tracked leaves.
     pub fn garbage_collect(&mut self) {
         let ommer_addrs: BTreeSet<_> = self
-            .prior_bridges
-            .iter()
+            .prior_bridges()
             .flat_map(|prior_bridge_frontier| {
                 prior_bridge_frontier
                     .position()
@@ -392,11 +490,9 @@ impl<H: Hashable + Clone, const DEPTH: u8> BridgeTree<H, DEPTH> {
             .as_ref()
             .ok_or(BridgeTreeError::PositionNotMarked(position))?;
 
-        let saved_idx = self
+        let prior_frontier = self
             .lookup_prior_bridge(position)
-            .map_err(|_| unlikely(|| BridgeTreeError::PositionNotMarked(position)))?;
-
-        let prior_frontier = &self.prior_bridges[saved_idx];
+            .ok_or_else(|| unlikely(|| BridgeTreeError::PositionNotMarked(position)))?;
 
         prior_frontier
             .witness(DEPTH, |addr| {
@@ -598,7 +694,7 @@ mod tests {
         ) {
             let tree_from_parts = BridgeTree::from_parts(
                 tree.frontier.as_ref().cloned(),
-                tree.prior_bridges.clone(),
+                tree.prior_bridges().cloned().collect(),
                 tree.tracking.clone(),
                 tree.ommers.clone(),
             )
@@ -649,7 +745,7 @@ mod tests {
             for pos in marked_pos {
                 assert_eq!(
                     upstream.witness(pos.into(), 0).unwrap(),
-                    forked.witness(pos.into()).unwrap(),
+                    forked.witness(pos.into()).unwrap_or_else(|_| panic!("Couldn't get merkle proof at {pos:?} with tree: {forked:#?}")),
                 );
             }
         }

@@ -14,13 +14,14 @@ license = "MIT OR Apache-2.0"
 categories = ["algorithms", "data-structures"]
 
 [features]
-std = ["thiserror/std"]
+std = ["thiserror/std", "slab/std"]
 display-error = ["dep:thiserror"]
 test-dependencies = ["proptest", "incrementalmerkletree/test-dependencies"]
 
 [dependencies]
 incrementalmerkletree = { version = "0.8", default-features = false }
 proptest = { version = "1", optional = true }
+slab = { version = "0.4.10", default-features = false }
 thiserror = { version = "2.0.12", optional = true }
 
 [dev-dependencies]
