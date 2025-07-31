@@ -483,6 +483,8 @@ impl<H: Hashable + Clone + MaybeSend, const DEPTH: u8> BridgeTree<H, DEPTH> {
     where
         I: IntoIterator<Item = Position>,
     {
+        // Set of leaves which we wish to remove. Well, more like
+        // the keys to those leaves' bridges, in the slab.
         let keys_of_marked_leaf_bridges = positions
             .into_iter()
             .map(|position| {
@@ -494,9 +496,15 @@ impl<H: Hashable + Clone + MaybeSend, const DEPTH: u8> BridgeTree<H, DEPTH> {
             })
             .collect::<Result<BTreeSet<_>, _>>()?;
 
-        self.prior_bridges_slab_keys
-            .retain(|key| !keys_of_marked_leaf_bridges.contains(key));
+        // Remove the keys from the vector of slab keys.
+        self.prior_bridges_slab_keys.retain(|key| {
+            let leaf_in_remove_set = keys_of_marked_leaf_bridges.contains(key);
 
+            // NB: We wish to retain the leaves **not** in the set.
+            !leaf_in_remove_set
+        });
+
+        // Remove the bridges from the slab.
         for key in keys_of_marked_leaf_bridges {
             self.prior_bridges_slab.remove(key);
         }
