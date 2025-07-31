@@ -42,6 +42,16 @@ pub use incrementalmerkletree::{
 #[cfg(feature = "display-error")]
 use thiserror::Error;
 
+#[cfg(feature = "std")]
+use ::std::marker::Send as MaybeSend;
+
+#[cfg(not(feature = "std"))]
+#[doc(hidden)]
+pub trait MaybeSend {}
+
+#[cfg(not(feature = "std"))]
+impl<T> MaybeSend for T {}
+
 /// Sparse representation of a Merkle tree with linear appending of leaves that contains enough
 /// information to produce a witness for any [marked](BridgeTree::mark) leaf.
 #[derive(Default, Clone)]
@@ -348,7 +358,7 @@ impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
     }
 }
 
-impl<H: Hashable + Clone, const DEPTH: u8> BridgeTree<H, DEPTH> {
+impl<H: Hashable + Clone + MaybeSend, const DEPTH: u8> BridgeTree<H, DEPTH> {
     /// Append a new leaf to the tree at the next available slot.
     ///
     /// Returns an error if the tree would exceed the maximum allowed depth.
@@ -460,33 +470,13 @@ impl<H: Hashable + Clone, const DEPTH: u8> BridgeTree<H, DEPTH> {
     }
 
     /// Convenience method for [`BridgeTree::remove_mark`] and [`BridgeTree::garbage_collect`].
+    ///
+    /// In general, it is preferred to batch calls to [`BridgeTree::remove_mark`], then have
+    /// a single call to [`BridgeTree::garbage_collect`], as this will be more efficient.
     pub fn remove_mark_and_gc(&mut self, position: Position) -> Result<(), BridgeTreeError> {
         self.remove_mark(position)?;
         self.garbage_collect();
         Ok(())
-    }
-
-    /// Remove data that is not necessary for the currently tracked leaves.
-    pub fn garbage_collect(&mut self) {
-        let ommer_addrs: BTreeSet<_> = self
-            .prior_bridges()
-            .flat_map(|prior_bridge_frontier| {
-                prior_bridge_frontier
-                    .position()
-                    .witness_addrs(Level::from(DEPTH))
-                    .filter_map(|(addr, source)| {
-                        if source == Source::Future {
-                            Some(addr)
-                        } else {
-                            None
-                        }
-                    })
-            })
-            .collect();
-
-        self.tracking
-            .retain(|addr| ommer_addrs.contains(&addr.sibling()));
-        self.ommers.retain(|addr, _| ommer_addrs.contains(addr));
     }
 
     /// Obtains a witness for the value at the specified leaf position.
@@ -519,6 +509,71 @@ impl<H: Hashable + Clone, const DEPTH: u8> BridgeTree<H, DEPTH> {
                 }
             })
             .map_err(BridgeTreeError::MissingOmmer)
+    }
+}
+
+#[cfg(feature = "std")]
+impl<H: Hashable + Clone + MaybeSend, const DEPTH: u8> BridgeTree<H, DEPTH> {
+    /// Remove data that is not necessary for the currently tracked leaves.
+    pub fn garbage_collect(&mut self) {
+        extern crate std;
+
+        use std::thread;
+
+        let ommer_addrs: BTreeSet<_> = self
+            .prior_bridges()
+            .flat_map(|prior_bridge_frontier| {
+                prior_bridge_frontier
+                    .position()
+                    .witness_addrs(Level::from(DEPTH))
+                    .filter_map(|(addr, source)| {
+                        if source == Source::Future {
+                            Some(addr)
+                        } else {
+                            None
+                        }
+                    })
+            })
+            .collect();
+
+        let Self {
+            tracking, ommers, ..
+        } = self;
+
+        thread::scope(|s| {
+            s.spawn(|| {
+                tracking.retain(|addr| ommer_addrs.contains(&addr.sibling()));
+            });
+            s.spawn(|| {
+                ommers.retain(|addr, _| ommer_addrs.contains(addr));
+            });
+        });
+    }
+}
+
+#[cfg(not(feature = "std"))]
+impl<H: Hashable + Clone, const DEPTH: u8> BridgeTree<H, DEPTH> {
+    /// Remove data that is not necessary for the currently tracked leaves.
+    pub fn garbage_collect(&mut self) {
+        let ommer_addrs: BTreeSet<_> = self
+            .prior_bridges()
+            .flat_map(|prior_bridge_frontier| {
+                prior_bridge_frontier
+                    .position()
+                    .witness_addrs(Level::from(DEPTH))
+                    .filter_map(|(addr, source)| {
+                        if source == Source::Future {
+                            Some(addr)
+                        } else {
+                            None
+                        }
+                    })
+            })
+            .collect();
+
+        self.tracking
+            .retain(|addr| ommer_addrs.contains(&addr.sibling()));
+        self.ommers.retain(|addr, _| ommer_addrs.contains(addr));
     }
 }
 
