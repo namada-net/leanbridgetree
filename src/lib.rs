@@ -52,6 +52,38 @@ pub trait MaybeSend {}
 #[cfg(not(feature = "std"))]
 impl<T> MaybeSend for T {}
 
+/// Struct used to debug the true (i.e. unmodified) inner
+/// representation of a [`BridgeTree`].
+pub struct DebugBridgeTree<'tree, H, const DEPTH: u8> {
+    tree: &'tree BridgeTree<H, DEPTH>,
+}
+
+impl<H: Debug, const DEPTH: u8> Debug for DebugBridgeTree<'_, H, DEPTH> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
+        // NB: We destructure `self` in order to catch compiler errors, should
+        // its internal structure ever change. See note below.
+        let Self {
+            tree:
+                BridgeTree {
+                    frontier,
+                    tracking,
+                    ommers,
+                    prior_bridges_slab,
+                    prior_bridges_slab_keys,
+                },
+        } = self;
+
+        // XXX: Keep me up to date!
+        f.debug_struct(stringify!(DebugBridgeTree))
+            .field("frontier", frontier)
+            .field("tracking", tracking)
+            .field("ommers", ommers)
+            .field("prior_bridges_slab", prior_bridges_slab)
+            .field("prior_bridges_slab_keys", prior_bridges_slab_keys)
+            .finish()
+    }
+}
+
 /// Sparse representation of a Merkle tree with linear appending of leaves that contains enough
 /// information to produce a witness for any [marked](BridgeTree::mark) leaf.
 #[derive(Default, Clone)]
@@ -176,6 +208,13 @@ impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
             ommers: BTreeMap::new(),
             frontier: None,
         }
+    }
+
+    /// Get a debug representation of a [`BridgeTree`] with no
+    /// sugaring of the inner fields.
+    #[inline]
+    pub fn unsugared_debug(&self) -> DebugBridgeTree<'_, H, DEPTH> {
+        DebugBridgeTree { tree: self }
     }
 
     /// Return the prior bridges that make up this tree
