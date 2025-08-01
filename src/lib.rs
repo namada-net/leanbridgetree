@@ -60,14 +60,19 @@ pub struct BridgeTree<H, const DEPTH: u8> {
     frontier: Option<NonEmptyFrontier<H>>,
     /// Storage of Merkle bridges.
     prior_bridges_slab: Slab<NonEmptyFrontier<H>>,
-    /// Ordered list of keys into `prior_bridges_slab`, representing the history
-    /// of the tree. There will be one bridge for each saved leaf.
+    /// List of keys into `prior_bridges_slab`, representing the history
+    /// of the tree.
+    ///
+    /// Keys are ordered by the bridges' frontier positions. There will
+    /// be one bridge for each saved leaf.
     prior_bridges_slab_keys: Vec<usize>,
-    /// Set of addresses for which we are waiting to discover the ommers.  The values of this
-    /// set and the keys of the `ommers` map should always be disjoint. Also, this set should
-    /// never contain an address for which the sibling value has been discovered; at that point,
-    /// the address is replaced in this set with its parent and the address/sibling pair is stored
-    /// in `ommers`.
+    /// Set of addresses for which we are waiting to discover the ommers.
+    ///
+    /// The values of this set and the keys of the `ommers` map should always
+    /// be disjoint. Also, this set should never contain an address for which
+    /// the sibling value has been discovered; at that point, the address is
+    /// replaced in this set with its parent and the address/sibling pair
+    /// is stored in `ommers`.
     ///
     /// Another way to consider the contents of this set is that the values that exist in
     /// `ommers`, combined with the values in previous bridges' `ommers` and an original leaf
