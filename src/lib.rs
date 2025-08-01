@@ -442,14 +442,14 @@ impl<H: Hashable + Clone + MaybeSend, const DEPTH: u8> BridgeTree<H, DEPTH> {
     /// Obtain the root of the Merkle tree at the maximum depth.
     #[inline]
     pub fn root(&self) -> H {
-        self.root_at_depth(DEPTH.into())
+        self.root_at_level(DEPTH.into())
     }
 
     /// Obtain the root of the Merkle tree at the specified level.
-    pub fn root_at_depth(&self, depth: Level) -> H {
+    pub fn root_at_level(&self, level: Level) -> H {
         self.frontier.as_ref().map_or_else(
-            || unlikely(|| H::empty_root(depth)),
-            |frontier| frontier.root(Some(depth)),
+            || unlikely(|| H::empty_root(level)),
+            |frontier| frontier.root(Some(level)),
         )
     }
 
