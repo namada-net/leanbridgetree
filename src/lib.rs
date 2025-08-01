@@ -262,6 +262,11 @@ impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
             .map_or(0, |f| u64::from(f.position()) + 1)
     }
 
+    /// Check whether the tree is empty (i.e. has no leaves).
+    pub fn is_empty(&self) -> bool {
+        self.frontier.is_none()
+    }
+
     /// Construct a new [`BridgeTree`] that will start recording changes from the state of
     /// the specified frontier.
     pub fn from_frontier(frontier: NonEmptyFrontier<H>) -> Result<Self, BridgeTreeError> {
@@ -993,6 +998,15 @@ mod tests {
                 let cloned = tree.clone_from_frontier_at(position);
                 prop_assert!(cloned.current_position() <= Some(position));
             }
+        }
+
+        #[test]
+        fn clone_from_frontier_on_empty_tree(pos in any::<u64>()) {
+            assert_eq!(
+                new_tree::<String>().clone_from_frontier_at(Position::from(pos))
+                    .current_position(),
+                None,
+            );
         }
     }
 
