@@ -322,6 +322,33 @@ impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
             .map(|bridge_frontier| bridge_frontier.leaf())
     }
 
+    /// Clone the tree's frontier at a position before or equal to the
+    /// provided `position`.
+    ///
+    /// The returned tree does not track any leaves.
+    pub fn clone_from_frontier_at(&self, position: Position) -> Self
+    where
+        H: Clone,
+    {
+        let frontier = match self.lookup_prior_bridge_slab_index(position) {
+            Ok(frontier_index) => {
+                let key = unsafe { *self.prior_bridges_slab_keys.get_unchecked(frontier_index) };
+                unsafe { self.get_prior_bridge_by_slab_key_unchecked(key) }
+            }
+            Err(0) => return Self::new(),
+            Err(index_to_insert) => {
+                let index = index_to_insert - 1;
+                let key = unsafe { *self.prior_bridges_slab_keys.get_unchecked(index) };
+                unsafe { self.get_prior_bridge_by_slab_key_unchecked(key) }
+            }
+        };
+
+        Self {
+            frontier: Some(frontier.clone()),
+            ..Self::new()
+        }
+    }
+
     /// Verify the integrity of the [`BridgeTree`].
     fn check_consistency_internal(
         prior_bridges: &[NonEmptyFrontier<H>],
@@ -939,6 +966,34 @@ mod tests {
                 );
             }
         }
+
+        #[test]
+        fn clone_from_frontier_le_bridge_pos(past_bridges in proptest::collection::vec(any::<bool>(), 100)) {
+            let mut tree = BridgeTree::<String, 7>::new();
+
+            for mark in past_bridges.iter().copied() {
+                tree.append("a".to_string()).unwrap();
+                if mark {
+                    tree.mark().unwrap();
+                }
+            }
+            for _remaining in past_bridges.len()..100 {
+                tree.append("a".to_string()).unwrap();
+            }
+
+            let marked_positions = past_bridges
+                .iter()
+                .copied()
+                .enumerate()
+                .filter_map(|(position, mark)| {
+                    mark.then_some(Position::from(position as u64))
+                });
+
+            for position in marked_positions {
+                let cloned = tree.clone_from_frontier_at(position);
+                prop_assert!(cloned.current_position() <= Some(position));
+            }
+        }
     }
 
     fn new_tree<H: Hashable + Clone + Debug + Send>() -> BridgeTree<H, 4> {
@@ -1272,6 +1327,63 @@ mod tests {
                         String::combine_all(3, &[]),
                     ]
                 ))
+            );
+        }
+    }
+
+    #[test]
+    fn clone_from_frontier() {
+        use Retention::*;
+        use incrementalmerkletree_testing::Operation;
+        use incrementalmerkletree_testing::Operation::Append;
+
+        let ops = vec![
+            /* 0 */ Append(String::from_u64(0), Marked),
+            /* 1 */ Append(String::from_u64(0), Ephemeral),
+            /* 2 */ Append(String::from_u64(0), Marked),
+            /* 3 */ Append(String::from_u64(0), Ephemeral),
+            /* 4 */ Append(String::from_u64(0), Ephemeral),
+            /* 5 */ Append(String::from_u64(0), Marked),
+        ];
+
+        let mut tree = new_tree::<String>();
+        Operation::apply_all(&ops, &mut tree);
+
+        struct TestCase {
+            clone_pos: u64,
+            expected_frontier_pos: u64,
+        }
+
+        for test_case in [
+            TestCase {
+                clone_pos: 0,
+                expected_frontier_pos: 0,
+            },
+            TestCase {
+                clone_pos: 1,
+                expected_frontier_pos: 0,
+            },
+            TestCase {
+                clone_pos: 2,
+                expected_frontier_pos: 2,
+            },
+            TestCase {
+                clone_pos: 3,
+                expected_frontier_pos: 2,
+            },
+            TestCase {
+                clone_pos: 4,
+                expected_frontier_pos: 2,
+            },
+            TestCase {
+                clone_pos: 5,
+                expected_frontier_pos: 5,
+            },
+        ] {
+            assert_eq!(
+                tree.clone_from_frontier_at(Position::from(test_case.clone_pos))
+                    .current_position(),
+                Some(Position::from(test_case.expected_frontier_pos))
             );
         }
     }
