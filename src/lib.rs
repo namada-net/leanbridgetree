@@ -232,15 +232,9 @@ impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
     /// However, given that the slab is never exposed to users, its underlying structure is fully
     /// under the control for this crate. Therefore, we never build an invalid storage of
     /// Merkle bridges. In any case, we should mark this method as `unsafe`.
+    #[inline]
     unsafe fn get_prior_bridge_by_slab_key_unchecked(&self, key: usize) -> &NonEmptyFrontier<H> {
-        #[cfg(debug_assertions)]
-        {
-            self.prior_bridges_slab.get(key).unwrap()
-        }
-        #[cfg(not(debug_assertions))]
-        {
-            unsafe { self.prior_bridges_slab.get_unchecked(key) }
-        }
+        unsafe { get_prior_bridge_by_slab_key_unchecked(&self.prior_bridges_slab, key) }
     }
 
     /// Return the bridge's frontier.
@@ -393,12 +387,11 @@ impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
     /// could be inserted, if `Err`.
     #[inline]
     fn lookup_prior_bridge_slab_index(&self, position: Position) -> Result<usize, usize> {
-        self.prior_bridges_slab_keys.binary_search_by(|&key| {
-            let bridge_frontier = unsafe { self.get_prior_bridge_by_slab_key_unchecked(key) };
-
-            // Compare the probe position with the bridge frontier's position.
-            bridge_frontier.position().cmp(&position)
-        })
+        lookup_prior_bridge_slab_index(
+            &self.prior_bridges_slab,
+            &self.prior_bridges_slab_keys,
+            position,
+        )
     }
 }
 
@@ -685,6 +678,36 @@ impl<H: Hashable + Clone, const DEPTH: u8> BridgeTree<H, DEPTH> {
 #[inline(never)]
 fn unlikely<R, F: FnOnce() -> R>(f: F) -> R {
     f()
+}
+
+#[inline]
+fn lookup_prior_bridge_slab_index<H>(
+    prior_bridges_slab: &Slab<NonEmptyFrontier<H>>,
+    prior_bridges_slab_keys: &[usize],
+    position: Position,
+) -> Result<usize, usize> {
+    prior_bridges_slab_keys.binary_search_by(|&key| {
+        let bridge_frontier =
+            unsafe { get_prior_bridge_by_slab_key_unchecked(prior_bridges_slab, key) };
+
+        // Compare the probe position with the bridge frontier's position.
+        bridge_frontier.position().cmp(&position)
+    })
+}
+
+#[inline]
+unsafe fn get_prior_bridge_by_slab_key_unchecked<H>(
+    prior_bridges_slab: &Slab<NonEmptyFrontier<H>>,
+    key: usize,
+) -> &NonEmptyFrontier<H> {
+    #[cfg(debug_assertions)]
+    {
+        prior_bridges_slab.get(key).unwrap()
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        unsafe { prior_bridges_slab.get_unchecked(key) }
+    }
 }
 
 #[cfg(test)]
