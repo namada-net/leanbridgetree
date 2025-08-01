@@ -20,7 +20,7 @@ fn remove_mark(c: &mut Criterion) {
                     (0u64..10000).map(incrementalmerkletree::Position::from),
                 )
                 .unwrap();
-                tree.garbage_collect();
+                tree.garbage_collect_ommers();
             },
             BatchSize::SmallInput,
         )
@@ -40,7 +40,7 @@ fn remove_mark(c: &mut Criterion) {
                 for position in (0u64..10000).map(incrementalmerkletree::Position::from) {
                     tree.remove_mark(position).unwrap();
                 }
-                tree.garbage_collect();
+                tree.garbage_collect_ommers();
             },
             BatchSize::SmallInput,
         )

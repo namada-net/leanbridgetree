@@ -514,7 +514,7 @@ impl<H: Hashable + Clone + MaybeSend, const DEPTH: u8> BridgeTree<H, DEPTH> {
     /// ## Warning
     ///
     /// This method does not remove the tracking data associated with
-    /// `positions`. Use [`BridgeTree::garbage_collect`] to get rid of
+    /// `positions`. Use [`BridgeTree::garbage_collect_ommers`] to get rid of
     /// this data.
     pub fn remove_multiple_marks<I>(&mut self, positions: I) -> Result<(), BridgeTreeError>
     where
@@ -549,17 +549,18 @@ impl<H: Hashable + Clone + MaybeSend, const DEPTH: u8> BridgeTree<H, DEPTH> {
         Ok(())
     }
 
-    /// Convenience method for calling [`BridgeTree::remove_mark`] and [`BridgeTree::garbage_collect`]
+    /// Convenience method for calling [`BridgeTree::remove_mark`] and
+    /// [`BridgeTree::garbage_collect_ommers`]
     /// in sequence.
     ///
     /// ## Performance
     ///
     /// In general, it is preferred to call [`BridgeTree::remove_multiple_marks`], then have
-    /// a single call to [`BridgeTree::garbage_collect`], as this will be **significantly**
+    /// a single call to [`BridgeTree::garbage_collect_ommers`], as this will be **significantly**
     /// more efficient.
     pub fn remove_mark_and_gc(&mut self, position: Position) -> Result<(), BridgeTreeError> {
         self.remove_mark(position)?;
-        self.garbage_collect();
+        self.garbage_collect_ommers();
         Ok(())
     }
 
@@ -599,7 +600,7 @@ impl<H: Hashable + Clone + MaybeSend, const DEPTH: u8> BridgeTree<H, DEPTH> {
 #[cfg(feature = "std")]
 impl<H: Hashable + Clone + MaybeSend, const DEPTH: u8> BridgeTree<H, DEPTH> {
     /// Remove data that is not necessary for the currently tracked leaves.
-    pub fn garbage_collect(&mut self) {
+    pub fn garbage_collect_ommers(&mut self) {
         use std::thread;
 
         // TODO: Optimize this
@@ -649,7 +650,7 @@ impl<H: Hashable + Clone + MaybeSend, const DEPTH: u8> BridgeTree<H, DEPTH> {
 #[cfg(not(feature = "std"))]
 impl<H: Hashable + Clone, const DEPTH: u8> BridgeTree<H, DEPTH> {
     /// Remove data that is not necessary for the currently tracked leaves.
-    pub fn garbage_collect(&mut self) {
+    pub fn garbage_collect_ommers(&mut self) {
         let ommer_addrs: BTreeSet<_> = self
             .prior_bridges()
             .flat_map(|prior_bridge_frontier| {
