@@ -196,6 +196,12 @@ pub enum BridgeTreeError {
     /// The tree is missing the data of an ommer at the given address.
     #[cfg_attr(feature = "display-error", error("Missing ommer data of {0:?}"))]
     MissingOmmer(Address),
+    /// The trees have different frontiers, thus cannot be merged.
+    #[cfg_attr(
+        feature = "display-error",
+        error("Attempted to merge two trees with different frontiers")
+    )]
+    MergeDifferentFrontier,
 }
 
 impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
@@ -352,6 +358,54 @@ impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
             frontier: Some(frontier.clone()),
             ..Self::new()
         }
+    }
+
+    /// Merge the data in this tree with the data in another tree.
+    ///
+    /// This results in an error if both trees have different frontiers.
+    pub fn merge_with(&mut self, mut other: Self) -> Result<(), BridgeTreeError>
+    where
+        H: PartialEq,
+    {
+        if self.frontier != other.frontier {
+            return Err(BridgeTreeError::MergeDifferentFrontier);
+        }
+
+        // Move the tracking data from `other` into `self`.
+        //
+        // We should not be missing any intermediate nodes
+        // required to build merkle proofs of existence of
+        // prior leaves, since the merged trees have the
+        // same frontier.
+        self.ommers.append(&mut other.ommers);
+        self.tracking.append(&mut other.tracking);
+
+        // Move all the bridges from `other` into `self`,
+        // unless they were already present.
+        let Self {
+            prior_bridges_slab_keys,
+            mut prior_bridges_slab,
+            ..
+        } = other;
+
+        let drain_other_prior_bridges = prior_bridges_slab_keys
+            .into_iter()
+            .map(move |key| prior_bridges_slab.remove(key));
+
+        for bridge_frontier in drain_other_prior_bridges {
+            let Err(index_of_marked_leaf_bridge) =
+                self.lookup_prior_bridge_slab_index(bridge_frontier.position())
+            else {
+                // Skip bridges already in `self`.
+                continue;
+            };
+
+            let key = self.prior_bridges_slab.insert(bridge_frontier);
+            self.prior_bridges_slab_keys
+                .insert(index_of_marked_leaf_bridge, key);
+        }
+
+        Ok(())
     }
 
     /// Verify the integrity of the [`BridgeTree`].
