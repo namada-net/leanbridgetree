@@ -221,7 +221,7 @@ impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
     pub fn prior_bridges(&self) -> impl Iterator<Item = &NonEmptyFrontier<H>> + '_ {
         self.prior_bridges_slab_keys
             .iter()
-            .map(|&index| unsafe { self.get_prior_bridge_by_slab_key_unchecked(index) })
+            .map(|&key| unsafe { self.get_prior_bridge_by_slab_key_unchecked(key) })
     }
 
     /// Return a prior Merkle bridge, given its slab key.
