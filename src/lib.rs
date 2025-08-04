@@ -1456,6 +1456,67 @@ mod tests {
         }
     }
 
+    #[test]
+    fn merge() {
+        use Retention::*;
+        use incrementalmerkletree_testing::Operation;
+        use incrementalmerkletree_testing::Operation::Append;
+
+        // Start by marking leaf at positon 3.
+        let ops = vec![
+            /* 0 */ Append(String::from_u64(0), Ephemeral),
+            /* 1 */ Append(String::from_u64(0), Ephemeral),
+            /* 2 */ Append(String::from_u64(0), Ephemeral),
+            /* 3 */ Append(String::from_u64(0), Marked),
+        ];
+
+        //    aaaa
+        //   /    \
+        //  aa    aa
+        //  / |   | \
+        // a  a   a  a
+        //    ^      ^
+        // 0  1   2  3
+
+        let mut tree = BridgeTree::<String, 2>::new();
+        Operation::apply_all(&ops, &mut tree);
+
+        let original_root = tree.root();
+        let original_proof_3 = tree.witness(3u64.into()).unwrap();
+        assert_eq!(
+            compute_root(String::from_u64(0), 3u64.into(), &original_proof_3),
+            original_root
+        );
+
+        // Now let's mark the tree at position 1.
+        let mut forked_tree = tree.clone_from_frontier_at(1u64.into());
+
+        while forked_tree.current_position() != tree.current_position() {
+            // Merging will always fail until the trees are caught up
+            assert!(tree.merge_with(forked_tree.clone()).is_err());
+
+            forked_tree.append(String::from_u64(0)).unwrap();
+
+            if forked_tree.current_position().unwrap() == 1u64.into() {
+                forked_tree.mark().unwrap();
+            }
+        }
+
+        // Merge the trees.
+        assert!(tree.merge_with(forked_tree).is_ok());
+        assert_eq!(tree.root(), original_root);
+
+        // Attempt to build merkle proofs with both marked leaves.
+        let proof_3 = tree.witness(3u64.into()).unwrap();
+        let proof_1 = tree.witness(1u64.into()).unwrap();
+
+        assert_eq!(proof_3, original_proof_3);
+        assert_eq!(
+            compute_root(String::from_u64(0), 1u64.into(), &proof_1),
+            original_root
+        );
+    }
+
     trait TestTree<H: TestHashable> {
         fn assert_root(&self, values: &[u64]);
 
@@ -1473,5 +1534,20 @@ mod tests {
                 "append failed for value {value}",
             );
         }
+    }
+
+    fn compute_root<H: Hashable>(leaf: H, position: Position, proof: &[H]) -> H {
+        let mut address: Address = position.into();
+
+        proof.iter().fold(leaf, |accum_node, sibling| {
+            let parent = if address.is_right_child() {
+                H::combine(address.level(), sibling, &accum_node)
+            } else {
+                H::combine(address.level(), &accum_node, sibling)
+            };
+
+            address = address.parent();
+            parent
+        })
     }
 }
