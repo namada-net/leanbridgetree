@@ -396,6 +396,8 @@ impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
             let Err(index_of_marked_leaf_bridge) =
                 self.lookup_prior_bridge_slab_index(bridge_frontier.position())
             else {
+                unlikely(|| {});
+
                 // Skip bridges already in `self`.
                 continue;
             };
