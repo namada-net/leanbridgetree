@@ -1763,6 +1763,72 @@ mod tests {
         );
     }
 
+    #[test]
+    fn update() {
+        // Create a tree with 128 leaves, with pos=1 marked
+        let (tree, frontiers) = {
+            let mut t = BridgeTree::<String, 8>::new();
+            let mut f = Vec::with_capacity(128);
+
+            for i in 0..128 {
+                t.append(String::from_u64(0)).unwrap();
+                if i == 1 {
+                    t.mark().unwrap();
+                }
+                let tt: &'static BridgeTree<String, 8> = unsafe { std::mem::transmute(&t) };
+                f.push(tt.frontier().cloned().unwrap());
+            }
+
+            (t, f)
+        };
+
+        let original_root = tree.root();
+        let original_proof_1 = tree.witness(1u64.into()).unwrap();
+        assert_eq!(
+            compute_root(String::from_u64(0), 1u64.into(), &original_proof_1),
+            original_root
+        );
+
+        // Now let's roll back the tree to pos=1
+        let mut updated_tree = {
+            let mut t = tree.clone_from_frontier_at(1u64.into());
+            t.mark().unwrap();
+            t
+        };
+
+        unsafe {
+            // And update the tree, additionally marking
+            // 15, 30, 77 and 127
+            updated_tree
+                .update(
+                    &frontiers,
+                    &[15u64.into(), 30u64.into(), 77u64.into(), 127u64.into()],
+                )
+                .unwrap();
+        }
+
+        assert_eq!(updated_tree.root(), original_root);
+
+        let proof_1 = updated_tree.witness(1u64.into()).unwrap();
+        let proof_15 = updated_tree.witness(15u64.into()).unwrap();
+        let proof_30 = updated_tree.witness(30u64.into()).unwrap();
+        let proof_77 = updated_tree.witness(77u64.into()).unwrap();
+        let proof_127 = updated_tree.witness(127u64.into()).unwrap();
+
+        for (marked_pos, proof) in [
+            (1u64, proof_1),
+            (15u64, proof_15),
+            (30, proof_30),
+            (77, proof_77),
+            (127, proof_127),
+        ] {
+            assert_eq!(
+                compute_root(String::from_u64(0), marked_pos.into(), &proof),
+                original_root
+            );
+        }
+    }
+
     trait TestTree<H: TestHashable> {
         fn assert_root(&self, values: &[u64]);
 
