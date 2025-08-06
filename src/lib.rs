@@ -591,7 +591,9 @@ impl<H: Hashable + Clone + MaybeSend, const DEPTH: u8> BridgeTree<H, DEPTH> {
             // we need to find a sibling.
             let parent = address.next_incomplete_parent();
             debug_assert!(!self.ommers.contains_key(&parent));
-            self.tracking.insert(parent);
+            if parent.level() < DEPTH.into() {
+                self.tracking.insert(parent);
+            }
         }
 
         Ok(())
@@ -695,7 +697,9 @@ impl<H: Hashable + Clone + MaybeSend, const DEPTH: u8> BridgeTree<H, DEPTH> {
                 self.tracking.remove(&address);
                 let parent = address.next_incomplete_parent();
                 debug_assert!(!self.ommers.contains_key(&parent));
-                self.tracking.insert(parent);
+                if parent.level() < DEPTH.into() {
+                    self.tracking.insert(parent);
+                }
             }
         }
 
