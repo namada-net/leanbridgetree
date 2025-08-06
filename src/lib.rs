@@ -52,6 +52,61 @@ pub trait MaybeSend {}
 #[cfg(not(feature = "std"))]
 impl<T> MaybeSend for T {}
 
+/// Abstract tree frontier.
+pub trait AbstractFrontier<H> {
+    /// The leaf at the frontier.
+    fn leaf(&self) -> &H;
+
+    /// The set of ommers of this frontier.
+    fn ommers(&self) -> &[H];
+
+    /// Get a [`NonEmptyFrontier`] from this [`AbstractFrontier`].
+    ///
+    /// Panics if the number of ommers is incorrect, or the position
+    /// is invalid.
+    fn to_non_empty_frontier(frontiers: &[Self], position: Position) -> NonEmptyFrontier<H>
+    where
+        Self: Sized,
+        H: Clone,
+    {
+        let frontier_index: usize = position.try_into().unwrap();
+        to_non_empty_frontier(position, &frontiers[frontier_index])
+    }
+}
+
+fn to_non_empty_frontier<F, H>(position: Position, frontier: &F) -> NonEmptyFrontier<H>
+where
+    H: Clone,
+    F: AbstractFrontier<H>,
+{
+    NonEmptyFrontier::from_parts(
+        position,
+        frontier.leaf().clone(),
+        frontier.ommers().to_vec(),
+    )
+    .unwrap()
+}
+
+impl<H> AbstractFrontier<H> for NonEmptyFrontier<H> {
+    fn leaf(&self) -> &H {
+        Self::leaf(self)
+    }
+
+    fn ommers(&self) -> &[H] {
+        Self::ommers(self)
+    }
+}
+
+impl<H> AbstractFrontier<H> for (H, Vec<H>) {
+    fn leaf(&self) -> &H {
+        &self.0
+    }
+
+    fn ommers(&self) -> &[H] {
+        &self.1
+    }
+}
+
 /// Struct used to debug the true (i.e. unmodified) inner
 /// representation of a [`BridgeTree`].
 pub struct DebugBridgeTree<'tree, H, const DEPTH: u8> {
@@ -196,12 +251,27 @@ pub enum BridgeTreeError {
     /// The tree is missing the data of an ommer at the given address.
     #[cfg_attr(feature = "display-error", error("Missing ommer data of {0:?}"))]
     MissingOmmer(Address),
+    /// The tree is missing the data of various ommers.
+    #[cfg_attr(
+        feature = "display-error",
+        error("Missing ommer data, expected {expected} but got {got}")
+    )]
+    MissingOmmers { expected: u8, got: u8 },
     /// The trees have different frontiers, thus cannot be merged.
     #[cfg_attr(
         feature = "display-error",
         error("Attempted to merge two trees with different frontiers")
     )]
     MergeDifferentFrontier,
+    /// Marked leaf position is outside the range of the latest frontier.
+    #[cfg_attr(
+        feature = "display-error",
+        error("Leaf {position:?} greater than leaf frontier {frontier:?}")
+    )]
+    PositionOutsideFrontierRange {
+        frontier: Position,
+        position: Position,
+    },
 }
 
 impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
@@ -527,6 +597,111 @@ impl<H: Hashable + Clone + MaybeSend, const DEPTH: u8> BridgeTree<H, DEPTH> {
         Ok(())
     }
 
+    /// Update this Merkle tree with the provided frontiers.
+    ///
+    /// Each position in `frontiers` represents a position of a leaf
+    /// in the Merkle tree, with the first index matching the first
+    /// leaf in the tree, and so on. New markings will be added for
+    /// each position in `new_marked_leaf_positions`.
+    ///
+    /// ## Safety
+    ///
+    /// This method does not validate the history of the provided frontiers.
+    /// It assumes the frontiers belong to the same Merkle tree as the one
+    /// in `self`.
+    pub unsafe fn update<F>(
+        &mut self,
+        frontiers: &[F],
+        new_marked_leaf_positions: &[Position],
+    ) -> Result<(), BridgeTreeError>
+    where
+        F: AbstractFrontier<H>,
+    {
+        // Validate the state changes before we apply them.
+        let latest_position = if !frontiers.is_empty() {
+            Position::from((frontiers.len() - 1) as u64)
+        } else {
+            // If no frontier is provided, we don't have anything to update...
+            return Ok(());
+        };
+        if Some(latest_position) <= self.current_position() {
+            // Nothing to do if the provided data precedes our
+            // frontier.
+            return Ok(());
+        }
+        for position in new_marked_leaf_positions.iter().copied() {
+            if position > latest_position {
+                return Err(BridgeTreeError::PositionOutsideFrontierRange {
+                    frontier: latest_position,
+                    position,
+                });
+            }
+        }
+        for (position, frontier) in frontiers.iter().enumerate() {
+            let position = Position::from(position as u64);
+
+            let ommers = frontier.ommers().len() as u8;
+            let expected = position.past_ommer_count();
+
+            if ommers != expected {
+                return Err(BridgeTreeError::MissingOmmers {
+                    got: ommers,
+                    expected,
+                });
+            }
+        }
+
+        // Update the frontier of the tree with the latest frontier.
+        self.frontier = Some(F::to_non_empty_frontier(frontiers, latest_position));
+
+        // Add all the new leaves we wish to track.
+        for position in new_marked_leaf_positions.iter().copied() {
+            let Err(index_of_marked_leaf_bridge) = self.lookup_prior_bridge_slab_index(position)
+            else {
+                unlikely(|| {});
+
+                // Skip bridges already in `self`.
+                continue;
+            };
+
+            self.tracking
+                .insert(Address::from(position).current_incomplete());
+
+            let frontier = F::to_non_empty_frontier(frontiers, position);
+
+            let key = self.prior_bridges_slab.insert(frontier);
+            self.prior_bridges_slab_keys
+                .insert(index_of_marked_leaf_bridge, key);
+        }
+
+        // Find all the missing ommers within the provided data.
+        let mut found = Vec::new();
+        loop {
+            for address in self.tracking.iter() {
+                if let Some(digest) = find_precomputed_ommer(address, frontiers)
+                    .cloned()
+                    .or_else(|| recompute_hash_at_address(address, frontiers))
+                {
+                    self.ommers.insert(address.sibling(), digest);
+                    found.push(*address);
+                }
+            }
+
+            if found.is_empty() {
+                break;
+            }
+
+            for address in found.drain(..) {
+                self.tracking.remove(&address);
+                let parent = address.next_incomplete_parent();
+                debug_assert!(!self.ommers.contains_key(&parent));
+                self.tracking.insert(parent);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Obtain the root of the Merkle tree at the maximum depth.
     #[inline]
     pub fn root(&self) -> H {
@@ -797,6 +972,71 @@ unsafe fn get_prior_bridge_by_slab_key_unchecked<H>(
     {
         unsafe { prior_bridges_slab.get_unchecked(key) }
     }
+}
+
+/// Given an address of an ommer and a contiguous slice of historical
+/// frontiers, return a reference to the pre-computed hash of the
+/// ommer if it exists.
+fn find_precomputed_ommer<'frontiers, H, F>(
+    ommer_addr: &Address,
+    frontiers: &'frontiers [F],
+) -> Option<&'frontiers H>
+where
+    F: AbstractFrontier<H>,
+{
+    // An ommer at `ommer_addr` is the root of a completed subtree.
+    // This hash is finalized and stored in the frontier's ommers
+    // when the leaf immediately following the subtree is added.
+    let next_leaf_pos = ommer_addr.position_range_end();
+
+    // Retrieve the candidate frontier. If it doesn't exist in our history,
+    // the ommer cannot have been computed yet.
+    let frontier_index: usize = next_leaf_pos
+        .try_into()
+        .expect("32bit platform has usizes that cannot be converted from u64s");
+    let candidate_frontier: &F = frontiers.get(frontier_index)?;
+
+    let p: u64 = next_leaf_pos.into();
+    let target_level: u64 = ommer_addr.level().into();
+
+    // An address can only be a past ommer for position `p` if the path for `p`
+    // at that level goes to the right. This corresponds to the bit for that level
+    // being a '1' in the binary representation of `p`.
+    let is_past_ommer = (p >> target_level) & 0x1 == 1;
+    if !is_past_ommer {
+        return None;
+    }
+
+    // The index of an ommer in the `ommers` vector is the count of past ommers
+    // at all levels below it. This is equivalent to the number of set bits ('1's)
+    // in the binary representation of `p` at positions less than `target_level`.
+    let mask = (1u64 << target_level) - 1;
+    let ommer_index = (p & mask).count_ones() as usize;
+
+    candidate_frontier.ommers().get(ommer_index)
+}
+
+/// Recompute the hash for a given address by finding the exact frontier
+/// that completed the subtree and calculating its root.
+fn recompute_hash_at_address<H, F>(target_address: &Address, frontiers_vec: &[F]) -> Option<H>
+where
+    H: Clone + Hashable,
+    F: AbstractFrontier<H>,
+{
+    // The state of the tree needed to compute the root of the target_address
+    // is perfectly captured by the frontier at the position of the *last leaf*
+    // within that address's subtree.
+    let end_leaf_pos = target_address.max_position();
+
+    // If we don't have the history for that final leaf, we can't compute the hash.
+    let frontier_index: usize = u64::from(end_leaf_pos)
+        .try_into()
+        .expect("32bit platform has usizes that cannot be converted from u64s");
+    let relevant_frontier = to_non_empty_frontier(end_leaf_pos, frontiers_vec.get(frontier_index)?);
+
+    // Calculate the root of this historical frontier, but only up to the level
+    // of the target address. This effectively gives us the hash of the subtree.
+    Some(relevant_frontier.root(Some(target_address.level())))
 }
 
 #[cfg(test)]
