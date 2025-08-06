@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+use std::rc::Rc;
 use std::time::Duration;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
@@ -151,9 +153,80 @@ fn append(c: &mut Criterion) {
     );
 }
 
+fn update(c: &mut Criterion) {
+    for tree_size in [1000u64, 10_000, 50_000, 100_000] {
+        c.bench_function(
+            &format!("build the tree ({tree_size} leaves) by calling append"),
+            |b| {
+                let marked_pos = Rc::new(
+                    (0u64..tree_size)
+                        .filter(|pos| pos & 0b11 == 0)
+                        .map(incrementalmerkletree::Position::from)
+                        .collect::<HashSet<_>>(),
+                );
+
+                b.iter_batched(
+                    || marked_pos.clone(),
+                    |marked_pos| {
+                        let mut tree = BridgeTree::<String, 32>::new();
+
+                        for position in (0u64..tree_size).map(incrementalmerkletree::Position::from)
+                        {
+                            tree.append("a".to_string()).unwrap();
+                            if marked_pos.contains(&position) {
+                                tree.mark().unwrap();
+                            }
+                        }
+                    },
+                    BatchSize::SmallInput,
+                )
+            },
+        );
+        c.bench_function(
+            &format!("build the tree ({tree_size} leaves) by calling update"),
+            |b| {
+                let marked_pos = Rc::new(
+                    (0u64..tree_size)
+                        .filter(|pos| pos & 0b11 == 0)
+                        .map(incrementalmerkletree::Position::from)
+                        .collect::<Vec<_>>(),
+                );
+                let mut frontiers = Vec::with_capacity(tree_size.try_into().unwrap());
+                let mut frontier = incrementalmerkletree::frontier::NonEmptyFrontier::from_parts(
+                    0u64.into(),
+                    "a".to_string(),
+                    vec![],
+                )
+                .unwrap();
+
+                // prefill tree
+                for _ in 1..tree_size {
+                    frontiers.push(frontier.clone());
+                    frontier.append("a".to_string());
+                }
+
+                drop(frontier);
+                let frontiers = Rc::new(frontiers);
+
+                b.iter_batched(
+                    || (frontiers.clone(), marked_pos.clone()),
+                    |(frontiers, marked_pos)| {
+                        let mut tree = BridgeTree::<String, 32>::new();
+
+                        unsafe {
+                            tree.update(&frontiers, &marked_pos).unwrap();
+                        }
+                    },
+                    BatchSize::SmallInput,
+                )
+            },
+        );
+    }
+}
+
 criterion_group!(
     name = benches;
     config = Criterion::default().warm_up_time(Duration::from_secs(10));
-    targets = append, remove_mark
+    targets = append, remove_mark, update
 );
 criterion_main!(benches);
