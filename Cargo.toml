@@ -8,8 +8,8 @@ authors = [
     "Heliax AG <hello@heliax.dev>",
 ]
 edition = "2024"
-repository = "https://github.com/zcash/incrementalmerkletree"
-homepage = "https://github.com/zcash/incrementalmerkletree"
+repository = "https://github.com/namada-net/leanbridgetree"
+homepage = "https://github.com/namada-net/leanbridgetree"
 license = "MIT OR Apache-2.0"
 categories = ["algorithms", "data-structures"]
 
