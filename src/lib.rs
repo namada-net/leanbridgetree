@@ -682,7 +682,7 @@ impl<H: Hashable + Clone + MaybeSend, const DEPTH: u8> BridgeTree<H, DEPTH> {
             for address in self.tracking.iter() {
                 if let Some(digest) = find_precomputed_ommer(address, frontiers)
                     .cloned()
-                    .or_else(|| recompute_hash_at_address(address, frontiers))
+                    .or_else(|| recompute_hash_at_address(&address.sibling(), frontiers))
                 {
                     self.ommers.insert(address.sibling(), digest);
                     found.push(*address);
