@@ -29,6 +29,9 @@
 
 extern crate alloc;
 
+#[cfg(all(feature = "std", feature = "borsh"))]
+mod borsh_impl;
+
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::vec::Vec;
 use core::fmt::Debug;
