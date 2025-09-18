@@ -1832,6 +1832,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn gc() {
+        let mut t = BridgeTree::<String, 8>::new();
+        let mut last_gc_pos = None;
+
+        for current_leaf_pos in 0..256 {
+            t.append(String::from_u64(0)).unwrap();
+            t.mark().unwrap();
+
+            for position in last_gc_pos.unwrap_or_default()..=current_leaf_pos {
+                _ = t.witness(position.into()).unwrap();
+            }
+
+            if current_leaf_pos - last_gc_pos.unwrap_or_default() > 10 {
+                for position in last_gc_pos.unwrap_or_default()..current_leaf_pos {
+                    t.remove_mark(position.into()).unwrap();
+                }
+                t.garbage_collect_ommers();
+                last_gc_pos = Some(current_leaf_pos);
+            }
+        }
+    }
+
     trait TestTree<H: TestHashable> {
         fn assert_root(&self, values: &[u64]);
 
