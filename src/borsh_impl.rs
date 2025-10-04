@@ -10,7 +10,7 @@ where
 {
     fn deserialize_reader<R: Read>(reader: &mut R) -> io::Result<Self> {
         fn deserialize_u32_as_usize<R: Read>(reader: &mut R) -> io::Result<usize> {
-            let x = u32::from_le(u32::deserialize_reader(reader)?);
+            let x = u32::deserialize_reader(reader)?;
             usize::try_from(x).map_err(io::Error::other)
         }
 
@@ -85,7 +85,7 @@ where
 {
     fn serialize<W: Write>(&self, writer: &mut W) -> io::Result<()> {
         fn serialize_usize_as_u32<W: Write>(x: usize, writer: &mut W) -> io::Result<()> {
-            let x = u32::try_from(x).map_err(io::Error::other)?.to_le();
+            let x = u32::try_from(x).map_err(io::Error::other)?;
             BorshSerialize::serialize(&x, writer)
         }
 
