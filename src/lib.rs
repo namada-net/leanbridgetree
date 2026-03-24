@@ -31,6 +31,8 @@ extern crate alloc;
 
 #[cfg(all(feature = "std", feature = "borsh"))]
 mod borsh_impl;
+#[cfg(feature = "serde")]
+mod serde_impl;
 
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::vec::Vec;

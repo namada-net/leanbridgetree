@@ -18,12 +18,14 @@ default = ["std", "display-error"]
 borsh = ["dep:borsh"]
 std = ["thiserror/std", "slab/std", "borsh/std"]
 display-error = ["dep:thiserror"]
+serde = ["dep:serde"]
 test-dependencies = ["proptest", "incrementalmerkletree/test-dependencies"]
 
 [dependencies]
 borsh = { version = "1.5.7", default-features = false, optional = true }
 incrementalmerkletree = { version = "0.8", default-features = false }
 proptest = { version = "1", optional = true }
+serde = { version = "1.0.228", optional = true }
 slab = { version = "0.4.10", default-features = false }
 thiserror = { version = "2.0.12", optional = true }
 
@@ -32,6 +34,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 bridgetree = "0.7.0"
 incrementalmerkletree-testing = "=0.2.0-backcompat.0.8"
 proptest = "1"
+serde_json = "1.0.149"
 
 [[bench]]
 name = "leanbridgetree"
