@@ -408,6 +408,19 @@ impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
             .map(|bridge_frontier| bridge_frontier.leaf())
     }
 
+    /// Return a new tree with the same frontier as `self`, but no
+    /// tracked leaves.
+    #[inline]
+    pub fn clone_from_frontier(&self) -> Self
+    where
+        H: Clone,
+    {
+        Self {
+            frontier: self.frontier.clone(),
+            ..Self::new()
+        }
+    }
+
     /// Clone the tree's frontier at a position before or equal to the
     /// provided `position`.
     ///
@@ -421,10 +434,7 @@ impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
             .frontier()
             .is_some_and(|frontier| frontier.position() == position)
         {
-            return Self {
-                frontier: self.frontier.clone(),
-                ..Self::new()
-            };
+            return self.clone_from_frontier();
         }
 
         // try from previous bridges
