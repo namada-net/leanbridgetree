@@ -23,8 +23,8 @@ jobs:
     - uses: actions/checkout@v4
     - name: Clippy (no_std)
       run: cargo clippy --verbose
-    - name: Clippy (no_std + borsh)
-      run: cargo clippy --verbose --no-default-features
+    - name: Clippy (no_std + serde)
+      run: cargo clippy --verbose --no-default-features --features serde
 
   clippy-with-tests-and-benches:
     runs-on: ubuntu-latest
@@ -32,26 +32,26 @@ jobs:
     - uses: actions/checkout@v4
     - name: Clippy (with tests)
       run: cargo clippy --verbose --tests
-    - name: Clippy (with tests + borsh)
-      run: cargo clippy --verbose --tests --benches --features borsh
+    - name: Clippy (with tests + borsh + serde)
+      run: cargo clippy --verbose --tests --benches --features borsh,serde
 
   test:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
     - name: Run tests
-      run: cargo test --verbose --features borsh
+      run: cargo test --verbose --features borsh,serde
 
   test-no-std:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
     - name: Run tests
-      run: cargo test --verbose --no-default-features
+      run: cargo test --verbose --no-default-features --features serde
 
   docs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
     - name: Generate docs
-      run: cargo doc --verbose --features borsh
+      run: cargo doc --verbose --features borsh,serde
