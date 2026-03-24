@@ -416,6 +416,18 @@ impl<H, const DEPTH: u8> BridgeTree<H, DEPTH> {
     where
         H: Clone,
     {
+        // try from latest frontier
+        if self
+            .frontier()
+            .is_some_and(|frontier| frontier.position() == position)
+        {
+            return Self {
+                frontier: self.frontier.clone(),
+                ..Self::new()
+            };
+        }
+
+        // try from previous bridges
         let frontier = match self.lookup_prior_bridge_slab_index(position) {
             Ok(frontier_index) => {
                 let key = unsafe { *self.prior_bridges_slab_keys.get_unchecked(frontier_index) };
@@ -1663,6 +1675,7 @@ mod tests {
             /* 3 */ Append(String::from_u64(0), Ephemeral),
             /* 4 */ Append(String::from_u64(0), Ephemeral),
             /* 5 */ Append(String::from_u64(0), Marked),
+            /* 6 */ Append(String::from_u64(0), Ephemeral),
         ];
 
         let mut tree = new_tree::<String>();
@@ -1697,6 +1710,10 @@ mod tests {
             TestCase {
                 clone_pos: 5,
                 expected_frontier_pos: 5,
+            },
+            TestCase {
+                clone_pos: 6,
+                expected_frontier_pos: 6,
             },
         ] {
             assert_eq!(
